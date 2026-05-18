@@ -32,7 +32,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -44,7 +45,8 @@ button {
 }
 
 button:disabled,
-input:disabled {
+input:disabled,
+textarea:disabled {
   cursor: not-allowed;
   opacity: 0.65;
 }
@@ -298,6 +300,13 @@ h2 {
   padding: 28px;
 }
 
+.chat-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .chat-header h1 {
   margin-bottom: 0;
 }
@@ -335,6 +344,11 @@ h2 {
   margin-top: 8px;
 }
 
+.compact-summary {
+  max-width: none;
+  margin-bottom: 0;
+}
+
 .message {
   max-width: 520px;
   padding: 14px 16px;
@@ -347,14 +361,81 @@ h2 {
   border: 1px solid var(--border);
 }
 
+.message-user {
+  margin-left: auto;
+  color: #ffffff;
+  background: var(--primary);
+}
+
 .message p {
   margin: 0;
+}
+
+.message-list {
+  display: grid;
+  gap: 12px;
+}
+
+.status-text {
+  margin-top: 10px !important;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.message-user .status-text {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.detail-list {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.message-user .detail-list {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.missing-fields {
+  margin-top: 12px;
+}
+
+.missing-fields p {
+  color: var(--text);
+  font-weight: 700;
 }
 
 .chat-input-row {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 12px;
+}
+
+.chat-compose {
+  display: grid;
+  gap: 14px;
+}
+
+.chat-compose label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.payload-editor textarea {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: #ffffff;
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 0.9rem;
 }
 
 @media (max-width: 760px) {
@@ -386,5 +467,13 @@ h2 {
 
   .chat-input-row {
     grid-template-columns: 1fr;
+  }
+
+  .chat-header {
+    flex-direction: column;
+  }
+
+  .chat-header .secondary-button {
+    width: 100%;
   }
 }
