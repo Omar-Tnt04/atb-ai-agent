@@ -1,4 +1,5 @@
 const { prepareAction } = require('../services/actionPreparation.service');
+const { executeAction } = require('../services/actionExecution.service');
 
 const prepareAgentAction = (req, res) => {
   const { actionName, payload = {} } = req.body;
@@ -20,6 +21,29 @@ const prepareAgentAction = (req, res) => {
   return res.status(result.httpStatus).json(result.body);
 };
 
+const executeAgentAction = (req, res) => {
+  const { actionName, payload = {} } = req.body;
+
+  if (!actionName) {
+    const result = executeAction({
+      actionName,
+      payload,
+      user: req.user,
+    });
+
+    return res.status(result.httpStatus).json(result.body);
+  }
+
+  const result = executeAction({
+    actionName,
+    payload,
+    user: req.user,
+  });
+
+  return res.status(result.httpStatus).json(result.body);
+};
+
 module.exports = {
+  executeAgentAction,
   prepareAgentAction,
 };
