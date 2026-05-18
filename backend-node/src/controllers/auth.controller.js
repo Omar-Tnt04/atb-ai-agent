@@ -1,13 +1,6 @@
 const mockUsers = require('../data/mockUsers');
 const { generateToken } = require('../utils/token');
-
-const maskPhoneNumber = (phoneNumber) => {
-  if (!phoneNumber) {
-    return null;
-  }
-
-  return `********${phoneNumber.slice(-3)}`;
-};
+const { maskPhoneNumber } = require('../utils/mask');
 
 const toSafeUser = (user) => {
   return {

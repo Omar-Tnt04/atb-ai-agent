@@ -2,7 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 
+const accountRoutes = require('./routes/account.routes');
+const appointmentRoutes = require('./routes/appointment.routes');
 const authRoutes = require('./routes/auth.routes');
+const complaintRoutes = require('./routes/complaint.routes');
+const documentRoutes = require('./routes/document.routes');
 const healthRoutes = require('./routes/health.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/error.middleware');
 
@@ -14,6 +18,10 @@ app.use(morgan('dev'));
 
 app.use('/health', healthRoutes);
 app.use('/auth', authRoutes);
+app.use('/mock/accounts', accountRoutes);
+app.use('/mock/documents', documentRoutes);
+app.use('/mock/complaints', complaintRoutes);
+app.use('/mock/appointments', appointmentRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
