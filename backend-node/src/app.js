@@ -11,6 +11,7 @@ const authRoutes = require('./routes/auth.routes');
 const complaintRoutes = require('./routes/complaint.routes');
 const documentRoutes = require('./routes/document.routes');
 const healthRoutes = require('./routes/health.routes');
+const smsVerificationRoutes = require('./routes/smsVerification.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/error.middleware');
 
 const app = express();
@@ -28,6 +29,7 @@ app.use('/mock/accounts', accountRoutes);
 app.use('/mock/documents', documentRoutes);
 app.use('/mock/complaints', complaintRoutes);
 app.use('/mock/appointments', appointmentRoutes);
+app.use('/sms', smsVerificationRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);
