@@ -9,6 +9,7 @@ const appointmentRoutes = require('./routes/appointment.routes');
 const auditRoutes = require('./routes/audit.routes');
 const authRoutes = require('./routes/auth.routes');
 const billRoutes = require('./routes/bill.routes');
+const chatRoutes = require('./routes/chat.routes');
 const complaintRoutes = require('./routes/complaint.routes');
 const documentRoutes = require('./routes/document.routes');
 const healthRoutes = require('./routes/health.routes');
@@ -24,6 +25,7 @@ app.use(morgan('dev'));
 
 app.use('/health', healthRoutes);
 app.use('/auth', authRoutes);
+app.use('/chat', chatRoutes);
 app.use('/actions', actionRoutes);
 app.use('/agent/actions', actionExecutionRoutes);
 app.use('/agent/audit', auditRoutes);
