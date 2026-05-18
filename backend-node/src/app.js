@@ -3,6 +3,7 @@ const cors = require('cors');
 const morgan = require('morgan');
 
 const accountRoutes = require('./routes/account.routes');
+const actionRoutes = require('./routes/action.routes');
 const appointmentRoutes = require('./routes/appointment.routes');
 const authRoutes = require('./routes/auth.routes');
 const complaintRoutes = require('./routes/complaint.routes');
@@ -18,6 +19,7 @@ app.use(morgan('dev'));
 
 app.use('/health', healthRoutes);
 app.use('/auth', authRoutes);
+app.use('/actions', actionRoutes);
 app.use('/mock/accounts', accountRoutes);
 app.use('/mock/documents', documentRoutes);
 app.use('/mock/complaints', complaintRoutes);

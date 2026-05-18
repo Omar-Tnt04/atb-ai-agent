@@ -1,0 +1,220 @@
+const CLIENT_ROLES = ['CLIENT'];
+const STAFF_ROLES = ['SUPPORT_AGENT', 'ADMIN'];
+const ALL_ROLES = ['CLIENT', 'SUPPORT_AGENT', 'ADMIN'];
+
+const actionRegistry = [
+  {
+    name: 'check_balance',
+    displayName: 'Check Balance',
+    description: 'View the balance of one authenticated client account.',
+    category: 'accounts',
+    riskLevel: 'low',
+    requiredFields: ['accountId'],
+    requiresConfirmation: false,
+    requiresSmsVerification: false,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: '/mock/accounts/:accountId/balance',
+    method: 'GET',
+    status: 'connected',
+  },
+  {
+    name: 'view_transactions',
+    displayName: 'View Transactions',
+    description: 'View recent transactions for one authenticated client account.',
+    category: 'accounts',
+    riskLevel: 'low',
+    requiredFields: ['accountId'],
+    requiresConfirmation: false,
+    requiresSmsVerification: false,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: '/mock/accounts/:accountId/transactions',
+    method: 'GET',
+    status: 'connected',
+  },
+  {
+    name: 'list_documents',
+    displayName: 'List Documents',
+    description: 'List available banking documents for the authenticated user.',
+    category: 'documents',
+    riskLevel: 'low',
+    requiredFields: [],
+    requiresConfirmation: false,
+    requiresSmsVerification: false,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: '/mock/documents',
+    method: 'GET',
+    status: 'connected',
+  },
+  {
+    name: 'check_complaint_status',
+    displayName: 'Check Complaint Status',
+    description: 'View the status and details of a complaint reference.',
+    category: 'complaints',
+    riskLevel: 'low',
+    requiredFields: ['reference'],
+    requiresConfirmation: false,
+    requiresSmsVerification: false,
+    allowedRoles: ALL_ROLES,
+    apiEndpoint: '/mock/complaints/:reference',
+    method: 'GET',
+    status: 'connected',
+  },
+  {
+    name: 'list_appointment_slots',
+    displayName: 'List Appointment Slots',
+    description: 'View available branch appointment slots.',
+    category: 'appointments',
+    riskLevel: 'low',
+    requiredFields: [],
+    requiresConfirmation: false,
+    requiresSmsVerification: false,
+    allowedRoles: ALL_ROLES,
+    apiEndpoint: '/mock/appointments/slots',
+    method: 'GET',
+    status: 'connected',
+  },
+  {
+    name: 'generate_document',
+    displayName: 'Generate Document',
+    description: 'Generate a simulated banking document for a client account.',
+    category: 'documents',
+    riskLevel: 'medium',
+    requiredFields: ['accountId', 'documentType', 'period'],
+    requiresConfirmation: true,
+    requiresSmsVerification: false,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: '/mock/documents/generate',
+    method: 'POST',
+    status: 'connected',
+  },
+  {
+    name: 'create_complaint',
+    displayName: 'Create Complaint',
+    description: 'Create a complaint linked to the authenticated client.',
+    category: 'complaints',
+    riskLevel: 'medium',
+    requiredFields: ['category', 'description'],
+    requiresConfirmation: true,
+    requiresSmsVerification: false,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: '/mock/complaints',
+    method: 'POST',
+    status: 'connected',
+  },
+  {
+    name: 'book_appointment',
+    displayName: 'Book Appointment',
+    description: 'Book a simulated appointment at an ATB branch.',
+    category: 'appointments',
+    riskLevel: 'medium',
+    requiredFields: ['branch', 'date', 'time'],
+    requiresConfirmation: true,
+    requiresSmsVerification: false,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: '/mock/appointments/book',
+    method: 'POST',
+    status: 'connected',
+  },
+  {
+    name: 'request_card',
+    displayName: 'Request Card',
+    description: 'Request a new debit or credit card.',
+    category: 'cards',
+    riskLevel: 'medium',
+    requiredFields: ['accountId', 'cardType'],
+    requiresConfirmation: true,
+    requiresSmsVerification: false,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: null,
+    method: 'POST',
+    status: 'not_connected',
+  },
+  {
+    name: 'pay_bill',
+    displayName: 'Pay Bill',
+    description: 'Pay a registered biller from a client account.',
+    category: 'payments',
+    riskLevel: 'high',
+    requiredFields: ['accountId', 'billerId', 'amount'],
+    requiresConfirmation: true,
+    requiresSmsVerification: true,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: null,
+    method: 'POST',
+    status: 'not_connected',
+  },
+  {
+    name: 'make_transfer',
+    displayName: 'Make Transfer',
+    description: 'Transfer funds from a client account to a beneficiary.',
+    category: 'transfers',
+    riskLevel: 'high',
+    requiredFields: ['fromAccountId', 'beneficiaryId', 'amount'],
+    requiresConfirmation: true,
+    requiresSmsVerification: true,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: null,
+    method: 'POST',
+    status: 'not_connected',
+  },
+  {
+    name: 'add_beneficiary',
+    displayName: 'Add Beneficiary',
+    description: 'Add a new transfer beneficiary.',
+    category: 'transfers',
+    riskLevel: 'high',
+    requiredFields: ['beneficiaryName', 'bankName', 'accountNumber'],
+    requiresConfirmation: true,
+    requiresSmsVerification: true,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: null,
+    method: 'POST',
+    status: 'not_connected',
+  },
+  {
+    name: 'update_security_info',
+    displayName: 'Update Security Information',
+    description: 'Update sensitive customer security information.',
+    category: 'security',
+    riskLevel: 'high',
+    requiredFields: ['fieldName', 'newValue'],
+    requiresConfirmation: true,
+    requiresSmsVerification: true,
+    allowedRoles: CLIENT_ROLES,
+    apiEndpoint: null,
+    method: 'PATCH',
+    status: 'not_connected',
+  },
+];
+
+const getAllActions = () => actionRegistry;
+
+const getActionByName = (name) => {
+  return actionRegistry.find((action) => action.name === name);
+};
+
+const getActionsByRole = (role) => {
+  return actionRegistry.filter((action) => action.allowedRoles.includes(role));
+};
+
+const getConnectedActionsByRole = (role) => {
+  return getActionsByRole(role).filter((action) => action.status === 'connected');
+};
+
+const isActionAllowedForRole = (actionName, role) => {
+  const action = getActionByName(actionName);
+
+  if (!action) {
+    return false;
+  }
+
+  return action.allowedRoles.includes(role);
+};
+
+module.exports = {
+  getAllActions,
+  getActionByName,
+  getActionsByRole,
+  getConnectedActionsByRole,
+  isActionAllowedForRole,
+};
