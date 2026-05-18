@@ -1,6 +1,22 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import {
+  getToken,
+  getUser,
+  removeToken,
+  removeUser,
+} from '../utils/authStorage';
 
 function Navbar() {
+  useLocation();
+  const navigate = useNavigate();
+  const isLoggedIn = Boolean(getToken() && getUser());
+
+  const handleLogout = () => {
+    removeToken();
+    removeUser();
+    navigate('/login');
+  };
+
   return (
     <header className="navbar">
       <NavLink to="/" className="brand" aria-label="ATB AI Banking Agent Home">
@@ -9,9 +25,19 @@ function Navbar() {
       </NavLink>
 
       <nav className="nav-links" aria-label="Primary navigation">
-        <NavLink to="/">Home</NavLink>
-        <NavLink to="/login">Login</NavLink>
-        <NavLink to="/chat">Chat</NavLink>
+        {isLoggedIn ? (
+          <>
+            <NavLink to="/chat">Chat</NavLink>
+            <button type="button" className="nav-button" onClick={handleLogout}>
+              Logout
+            </button>
+          </>
+        ) : (
+          <>
+            <NavLink to="/">Home</NavLink>
+            <NavLink to="/login">Login</NavLink>
+          </>
+        )}
       </nav>
     </header>
   );

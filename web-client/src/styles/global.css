@@ -101,15 +101,19 @@ a {
   gap: 8px;
 }
 
-.nav-links a {
+.nav-links a,
+.nav-button {
   padding: 9px 12px;
   border-radius: 6px;
   color: var(--muted);
+  background: transparent;
   font-weight: 600;
+  min-height: 0;
 }
 
 .nav-links a.active,
-.nav-links a:hover {
+.nav-links a:hover,
+.nav-button:hover {
   color: var(--primary-dark);
   background: var(--surface-strong);
 }
@@ -273,6 +277,21 @@ h2 {
   background: #ffffff;
 }
 
+.demo-credentials {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+
+.demo-credentials h2 {
+  margin-bottom: 12px;
+}
+
+.demo-credentials p {
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+
 .chat-layout {
   display: grid;
   gap: 18px;
@@ -289,6 +308,31 @@ h2 {
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #f8fafc;
+}
+
+.account-summary {
+  display: grid;
+  gap: 8px;
+  max-width: 520px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.account-summary h2 {
+  font-size: 1.25rem;
+}
+
+.account-summary p {
+  margin-bottom: 0;
+  color: var(--muted);
+}
+
+.account-summary .secondary-button {
+  width: fit-content;
+  margin-top: 8px;
 }
 
 .message {
