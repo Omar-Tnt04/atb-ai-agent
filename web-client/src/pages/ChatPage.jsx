@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  cancelAction,
+  confirmAction,
+  executeAction,
+} from '../api/actionApi';
 import { sendChatMessage } from '../api/chatApi';
 import {
   getToken,
@@ -29,6 +34,9 @@ function ChatPage() {
   const [payloadText, setPayloadText] = useState('');
   const [payloadError, setPayloadError] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [actionLoadingText, setActionLoadingText] = useState('');
+  const [pendingAction, setPendingAction] = useState(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState(null);
 
   useEffect(() => {
     if (!token || !user) {
@@ -67,6 +75,13 @@ function ChatPage() {
     ]);
   };
 
+  const appendAssistantMessage = (chatMessage) => {
+    appendMessage({
+      sender: 'assistant',
+      ...chatMessage,
+    });
+  };
+
   const buildAssistantDetails = (response) => {
     if (response.status === 'action_prepared') {
       return {
@@ -81,6 +96,58 @@ function ChatPage() {
     }
 
     return null;
+  };
+
+  const buildResultDetails = (data) => {
+    if (!data) {
+      return null;
+    }
+
+    return {
+      result: data,
+    };
+  };
+
+  const handleExecutionResponse = (response) => {
+    if (response.status === 'completed') {
+      appendAssistantMessage({
+        text: 'Action completed successfully.',
+        status: response.status,
+        details: buildResultDetails(response.data),
+      });
+      setPendingAction(null);
+      setPendingConfirmation(null);
+      return;
+    }
+
+    if (response.status === 'confirmation_required') {
+      appendAssistantMessage({
+        text: 'This action needs your confirmation before it can continue.',
+        status: response.status,
+      });
+      setPendingAction(null);
+      setPendingConfirmation(response.data);
+      return;
+    }
+
+    if (
+      response.status === 'high_risk_blocked' ||
+      response.status === 'sms_required'
+    ) {
+      appendAssistantMessage({
+        text:
+          'This action requires SMS verification. SMS UI will be added in the next step.',
+        status: response.status,
+      });
+      setPendingAction(null);
+      setPendingConfirmation(null);
+      return;
+    }
+
+    appendAssistantMessage({
+      text: response.message || 'The action could not be completed.',
+      status: response.status || 'error',
+    });
   };
 
   const handleSend = async (event) => {
@@ -129,6 +196,11 @@ function ChatPage() {
         token,
       });
 
+      if (response.status === 'action_prepared') {
+        setPendingAction(response.data?.preparation || null);
+        setPendingConfirmation(null);
+      }
+
       setMessages((currentMessages) =>
         currentMessages
           .filter((chatMessage) => chatMessage.id !== loadingMessageId)
@@ -156,6 +228,92 @@ function ChatPage() {
       );
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleContinueAction = async () => {
+    if (!pendingAction || actionLoadingText) {
+      return;
+    }
+
+    setActionLoadingText('Executing action...');
+
+    try {
+      const response = await executeAction({
+        actionName: pendingAction.actionName,
+        payload: pendingAction.payload,
+        token,
+      });
+
+      handleExecutionResponse(response);
+    } catch (error) {
+      appendAssistantMessage({
+        text:
+          error.response?.data?.message ||
+          'I could not execute this action. Please try again.',
+        status: error.response?.data?.status || 'error',
+      });
+    } finally {
+      setActionLoadingText('');
+    }
+  };
+
+  const handleConfirmAction = async () => {
+    if (!pendingConfirmation || actionLoadingText) {
+      return;
+    }
+
+    setActionLoadingText('Waiting for confirmation...');
+
+    try {
+      const response = await confirmAction({
+        confirmationId: pendingConfirmation.confirmationId,
+        token,
+      });
+
+      handleExecutionResponse(response);
+    } catch (error) {
+      appendAssistantMessage({
+        text:
+          error.response?.data?.message ||
+          'I could not confirm this action. Please try again.',
+        status: error.response?.data?.status || 'error',
+      });
+    } finally {
+      setActionLoadingText('');
+    }
+  };
+
+  const handleCancelAction = async () => {
+    if (actionLoadingText) {
+      return;
+    }
+
+    setActionLoadingText('Cancelling action...');
+
+    try {
+      if (pendingConfirmation?.confirmationId) {
+        await cancelAction({
+          confirmationId: pendingConfirmation.confirmationId,
+          token,
+        });
+      }
+
+      appendAssistantMessage({
+        text: 'Action cancelled.',
+        status: 'cancelled',
+      });
+      setPendingAction(null);
+      setPendingConfirmation(null);
+    } catch (error) {
+      appendAssistantMessage({
+        text:
+          error.response?.data?.message ||
+          'I could not cancel this action. Please try again.',
+        status: error.response?.data?.status || 'error',
+      });
+    } finally {
+      setActionLoadingText('');
     }
   };
 
@@ -214,10 +372,86 @@ function ChatPage() {
                   </ul>
                 </div>
               ) : null}
+
+              {chatMessage.details?.result ? (
+                <pre className="result-box">
+                  {JSON.stringify(chatMessage.details.result, null, 2)}
+                </pre>
+              ) : null}
             </div>
           ))}
         </div>
       </div>
+
+      {pendingAction ? (
+        <div className="action-card">
+          <p className="eyebrow">Prepared Action</p>
+          <h2>{pendingAction.displayName}</h2>
+          <p className="status-text">status: action_prepared</p>
+          <ul className="detail-list">
+            {pendingAction.summary.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          <div className="action-button-row">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleContinueAction}
+              disabled={Boolean(actionLoadingText)}
+            >
+              Continue
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleCancelAction}
+              disabled={Boolean(actionLoadingText)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingConfirmation ? (
+        <div className="action-card">
+          <p className="eyebrow">Confirmation Required</p>
+          <h2>{pendingConfirmation.actionName}</h2>
+          <p>Confirmation ID: {pendingConfirmation.confirmationId}</p>
+          <p>Risk level: {pendingConfirmation.riskLevel}</p>
+          <p>Expires at: {pendingConfirmation.expiresAt}</p>
+          {pendingConfirmation.summary?.length ? (
+            <ul className="detail-list">
+              {pendingConfirmation.summary.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          ) : null}
+          <div className="action-button-row">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleConfirmAction}
+              disabled={Boolean(actionLoadingText)}
+            >
+              Confirm
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleCancelAction}
+              disabled={Boolean(actionLoadingText)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {actionLoadingText ? (
+        <p className="muted action-loading">{actionLoadingText}</p>
+      ) : null}
 
       <form className="chat-compose" onSubmit={handleSend}>
         <label>
