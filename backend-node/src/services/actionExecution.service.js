@@ -7,7 +7,15 @@ const {
 const mockComplaints = require('../data/mockComplaints');
 const mockDocuments = require('../data/mockDocuments');
 const mockTransactions = require('../data/mockTransactions');
+const { buildSummary } = require('./actionPreparation.service');
 const { createAuditLog } = require('./auditLog.service');
+const {
+  createPendingConfirmation,
+  getPendingConfirmationById,
+  isConfirmationExpired,
+  markConfirmationAsCancelled,
+  markConfirmationAsConfirmed,
+} = require('./confirmation.service');
 const { maskAccountNumber } = require('../utils/mask');
 const { getMissingFields } = require('../utils/validation');
 
@@ -222,7 +230,17 @@ const executeConnectedAction = ({ actionName, payload, user }) => {
   }
 };
 
-const createExecutionLog = ({ user, action, actionName, payload, status, result, failureReason }) => {
+const createExecutionLog = ({
+  user,
+  action,
+  actionName,
+  payload,
+  status,
+  result,
+  failureReason,
+  confirmationId,
+  confirmationStatus,
+}) => {
   return createAuditLog({
     userId: user.id,
     role: user.role,
@@ -233,19 +251,13 @@ const createExecutionLog = ({ user, action, actionName, payload, status, result,
     apiEndpoint: action?.apiEndpoint,
     result,
     failureReason,
+    confirmationId,
+    confirmationStatus,
   });
 };
 
-const executeAction = ({ actionName, payload = {}, user }) => {
+const validateActionRequest = ({ actionName, payload, user }) => {
   if (!actionName) {
-    createExecutionLog({
-      user,
-      actionName,
-      payload,
-      status: 'missing_fields',
-      failureReason: 'actionName is required',
-    });
-
     return {
       httpStatus: 400,
       body: {
@@ -253,20 +265,16 @@ const executeAction = ({ actionName, payload = {}, user }) => {
         status: 'missing_fields',
         missingFields: ['actionName'],
       },
+      log: {
+        status: 'missing_fields',
+        failureReason: 'actionName is required',
+      },
     };
   }
 
   const action = getActionByName(actionName);
 
   if (!action) {
-    createExecutionLog({
-      user,
-      actionName,
-      payload,
-      status: 'not_found',
-      failureReason: 'Action not found',
-    });
-
     return {
       httpStatus: 404,
       body: {
@@ -274,25 +282,25 @@ const executeAction = ({ actionName, payload = {}, user }) => {
         status: 'not_found',
         message: 'Action not found',
       },
+      log: {
+        status: 'not_found',
+        failureReason: 'Action not found',
+      },
     };
   }
 
   if (!action.allowedRoles.includes(user.role)) {
-    createExecutionLog({
-      user,
-      action,
-      actionName,
-      payload,
-      status: 'forbidden',
-      failureReason: 'Action is not allowed for this user role',
-    });
-
     return {
+      action,
       httpStatus: 403,
       body: {
         success: false,
         status: 'forbidden',
         message: 'Action is not allowed for this user role',
+      },
+      log: {
+        status: 'forbidden',
+        failureReason: 'Action is not allowed for this user role',
       },
     };
   }
@@ -300,36 +308,24 @@ const executeAction = ({ actionName, payload = {}, user }) => {
   const missingFields = getMissingFields(action.requiredFields, payload);
 
   if (missingFields.length > 0) {
-    createExecutionLog({
-      user,
-      action,
-      actionName,
-      payload,
-      status: 'missing_fields',
-      failureReason: `Missing fields: ${missingFields.join(', ')}`,
-    });
-
     return {
+      action,
       httpStatus: 400,
       body: {
         success: false,
         status: 'missing_fields',
         missingFields,
       },
+      log: {
+        status: 'missing_fields',
+        failureReason: `Missing fields: ${missingFields.join(', ')}`,
+      },
     };
   }
 
   if (action.riskLevel === 'high') {
-    createExecutionLog({
-      user,
-      action,
-      actionName,
-      payload,
-      status: 'high_risk_blocked',
-      failureReason: 'High-risk action flow is not implemented',
-    });
-
     return {
+      action,
       httpStatus: 400,
       body: {
         success: false,
@@ -337,29 +333,42 @@ const executeAction = ({ actionName, payload = {}, user }) => {
         message:
           'This action requires confirmation and SMS verification and will be implemented in the high-risk action flow.',
       },
+      log: {
+        status: 'high_risk_blocked',
+        failureReason: 'High-risk action flow is not implemented',
+      },
     };
   }
 
   if (action.status === 'not_connected') {
-    createExecutionLog({
-      user,
-      action,
-      actionName,
-      payload,
-      status: 'not_connected',
-      failureReason: 'Action is not connected in the current MVP',
-    });
-
     return {
+      action,
       httpStatus: 400,
       body: {
         success: false,
         status: 'not_connected',
         message: 'This action is understood but not connected in the current MVP.',
       },
+      log: {
+        status: 'not_connected',
+        failureReason: 'Action is not connected in the current MVP',
+      },
     };
   }
 
+  return {
+    action,
+  };
+};
+
+const executeValidatedAction = ({
+  action,
+  actionName,
+  payload,
+  user,
+  confirmationId,
+  confirmationStatus,
+}) => {
   const executionResult = executeConnectedAction({ actionName, payload, user });
 
   if (!executionResult.success) {
@@ -370,6 +379,8 @@ const executeAction = ({ actionName, payload = {}, user }) => {
       payload,
       status: executionResult.status,
       failureReason: executionResult.message,
+      confirmationId,
+      confirmationStatus,
     });
 
     return {
@@ -389,6 +400,8 @@ const executeAction = ({ actionName, payload = {}, user }) => {
     payload,
     status: 'completed',
     result: executionResult.data,
+    confirmationId,
+    confirmationStatus,
   });
 
   return {
@@ -402,6 +415,305 @@ const executeAction = ({ actionName, payload = {}, user }) => {
   };
 };
 
+const executeAction = ({ actionName, payload = {}, user }) => {
+  const validation = validateActionRequest({ actionName, payload, user });
+
+  if (validation.body) {
+    createExecutionLog({
+      user,
+      action: validation.action,
+      actionName,
+      payload,
+      status: validation.log.status,
+      failureReason: validation.log.failureReason,
+    });
+
+    return {
+      httpStatus: validation.httpStatus,
+      body: validation.body,
+    };
+  }
+
+  const { action } = validation;
+
+  if (action.riskLevel === 'medium') {
+    const summary = buildSummary(action, payload, user);
+    const confirmation = createPendingConfirmation({
+      userId: user.id,
+      actionName,
+      riskLevel: action.riskLevel,
+      payload,
+      summary,
+      expiresInMinutes: 10,
+    });
+
+    createExecutionLog({
+      user,
+      action,
+      actionName,
+      payload,
+      status: 'confirmation_required',
+      result: {
+        confirmationId: confirmation.id,
+        expiresAt: confirmation.expiresAt,
+      },
+      confirmationId: confirmation.id,
+    });
+
+    return {
+      httpStatus: 200,
+      body: {
+        success: true,
+        status: 'confirmation_required',
+        message: 'Please confirm this action before execution.',
+        data: {
+          confirmationId: confirmation.id,
+          actionName,
+          riskLevel: action.riskLevel,
+          summary,
+          expiresAt: confirmation.expiresAt,
+        },
+      },
+    };
+  }
+
+  return executeValidatedAction({
+    action,
+    actionName,
+    payload,
+    user,
+  });
+};
+
+const confirmAction = ({ confirmationId, user }) => {
+  if (!confirmationId) {
+    createExecutionLog({
+      user,
+      status: 'missing_fields',
+      failureReason: 'confirmationId is required',
+    });
+
+    return {
+      httpStatus: 400,
+      body: {
+        success: false,
+        status: 'missing_fields',
+        missingFields: ['confirmationId'],
+      },
+    };
+  }
+
+  const confirmation = getPendingConfirmationById(confirmationId);
+
+  if (!confirmation || confirmation.userId !== user.id) {
+    createExecutionLog({
+      user,
+      status: 'not_found',
+      failureReason: 'Confirmation not found',
+      confirmationId,
+    });
+
+    return {
+      httpStatus: 404,
+      body: {
+        success: false,
+        status: 'not_found',
+        message: 'Confirmation not found',
+      },
+    };
+  }
+
+  const action = getActionByName(confirmation.actionName);
+
+  if (isConfirmationExpired(confirmation)) {
+    createExecutionLog({
+      user,
+      action,
+      actionName: confirmation.actionName,
+      payload: confirmation.payload,
+      status: 'confirmation_expired',
+      failureReason: 'Confirmation expired',
+      confirmationId,
+    });
+
+    return {
+      httpStatus: 400,
+      body: {
+        success: false,
+        status: 'confirmation_expired',
+        message: 'This confirmation has expired. Please start the action again.',
+      },
+    };
+  }
+
+  if (confirmation.status !== 'pending') {
+    createExecutionLog({
+      user,
+      action,
+      actionName: confirmation.actionName,
+      payload: confirmation.payload,
+      status: confirmation.status,
+      failureReason: `Confirmation is already ${confirmation.status}`,
+      confirmationId,
+    });
+
+    return {
+      httpStatus: 400,
+      body: {
+        success: false,
+        status: `confirmation_${confirmation.status}`,
+        message: `This confirmation is already ${confirmation.status}.`,
+      },
+    };
+  }
+
+  markConfirmationAsConfirmed(confirmationId);
+
+  const validation = validateActionRequest({
+    actionName: confirmation.actionName,
+    payload: confirmation.payload,
+    user,
+  });
+
+  if (validation.body) {
+    createExecutionLog({
+      user,
+      action: validation.action,
+      actionName: confirmation.actionName,
+      payload: confirmation.payload,
+      status: validation.log.status,
+      failureReason: validation.log.failureReason,
+      confirmationId,
+      confirmationStatus: 'confirmed',
+    });
+
+    return {
+      httpStatus: validation.httpStatus,
+      body: validation.body,
+    };
+  }
+
+  return executeValidatedAction({
+    action: validation.action,
+    actionName: confirmation.actionName,
+    payload: confirmation.payload,
+    user,
+    confirmationId,
+    confirmationStatus: 'confirmed',
+  });
+};
+
+const cancelAction = ({ confirmationId, user }) => {
+  if (!confirmationId) {
+    createExecutionLog({
+      user,
+      status: 'missing_fields',
+      failureReason: 'confirmationId is required',
+    });
+
+    return {
+      httpStatus: 400,
+      body: {
+        success: false,
+        status: 'missing_fields',
+        missingFields: ['confirmationId'],
+      },
+    };
+  }
+
+  const confirmation = getPendingConfirmationById(confirmationId);
+
+  if (!confirmation || confirmation.userId !== user.id) {
+    createExecutionLog({
+      user,
+      status: 'not_found',
+      failureReason: 'Confirmation not found',
+      confirmationId,
+    });
+
+    return {
+      httpStatus: 404,
+      body: {
+        success: false,
+        status: 'not_found',
+        message: 'Confirmation not found',
+      },
+    };
+  }
+
+  const action = getActionByName(confirmation.actionName);
+
+  if (isConfirmationExpired(confirmation)) {
+    createExecutionLog({
+      user,
+      action,
+      actionName: confirmation.actionName,
+      payload: confirmation.payload,
+      status: 'confirmation_expired',
+      failureReason: 'Confirmation expired',
+      confirmationId,
+    });
+
+    return {
+      httpStatus: 400,
+      body: {
+        success: false,
+        status: 'confirmation_expired',
+        message: 'This confirmation has expired. Please start the action again.',
+      },
+    };
+  }
+
+  if (confirmation.status !== 'pending') {
+    createExecutionLog({
+      user,
+      action,
+      actionName: confirmation.actionName,
+      payload: confirmation.payload,
+      status: confirmation.status,
+      failureReason: `Confirmation is already ${confirmation.status}`,
+      confirmationId,
+    });
+
+    return {
+      httpStatus: 400,
+      body: {
+        success: false,
+        status: `confirmation_${confirmation.status}`,
+        message: `This confirmation is already ${confirmation.status}.`,
+      },
+    };
+  }
+
+  markConfirmationAsCancelled(confirmationId);
+
+  createExecutionLog({
+    user,
+    action,
+    actionName: confirmation.actionName,
+    payload: confirmation.payload,
+    status: 'cancelled',
+    result: {
+      confirmationId,
+    },
+    confirmationId,
+  });
+
+  return {
+    httpStatus: 200,
+    body: {
+      success: true,
+      status: 'cancelled',
+      message: 'Action confirmation cancelled successfully',
+      data: {
+        confirmationId,
+      },
+    },
+  };
+};
+
 module.exports = {
+  cancelAction,
+  confirmAction,
   executeAction,
 };

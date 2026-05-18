@@ -116,5 +116,6 @@ const prepareAction = ({ actionName, payload = {}, user }) => {
 };
 
 module.exports = {
+  buildSummary,
   prepareAction,
 };

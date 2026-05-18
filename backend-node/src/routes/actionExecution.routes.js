@@ -1,6 +1,8 @@
 const express = require('express');
 
 const {
+  cancelAgentAction,
+  confirmAgentAction,
   executeAgentAction,
   prepareAgentAction,
 } = require('../controllers/actionExecution.controller');
@@ -10,6 +12,8 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
+router.post('/cancel', cancelAgentAction);
+router.post('/confirm', confirmAgentAction);
 router.post('/execute', executeAgentAction);
 router.post('/prepare', prepareAgentAction);
 
