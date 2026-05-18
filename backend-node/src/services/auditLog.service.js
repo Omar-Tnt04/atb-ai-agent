@@ -32,6 +32,7 @@ const createAuditLog = (logData) => {
     apiEndpoint: logData.apiEndpoint || null,
     confirmationId: logData.confirmationId || null,
     confirmation_status: logData.confirmationStatus || null,
+    sms_verification_status: logData.smsVerificationStatus || null,
     result: logData.result || null,
     failureReason: logData.failureReason || null,
     createdAt: new Date().toISOString(),

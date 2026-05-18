@@ -3,6 +3,7 @@ const {
   cancelAction,
   confirmAction,
   executeAction,
+  verifyAndExecuteAction,
 } = require('../services/actionExecution.service');
 
 const prepareAgentAction = (req, res) => {
@@ -69,9 +70,22 @@ const cancelAgentAction = (req, res) => {
   return res.status(result.httpStatus).json(result.body);
 };
 
+const verifyAndExecuteAgentAction = (req, res) => {
+  const { confirmationId, code } = req.body;
+
+  const result = verifyAndExecuteAction({
+    confirmationId,
+    code,
+    user: req.user,
+  });
+
+  return res.status(result.httpStatus).json(result.body);
+};
+
 module.exports = {
   cancelAgentAction,
   confirmAgentAction,
   executeAgentAction,
   prepareAgentAction,
+  verifyAndExecuteAgentAction,
 };

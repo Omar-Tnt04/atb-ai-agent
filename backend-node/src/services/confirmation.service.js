@@ -65,8 +65,12 @@ const isConfirmationExpired = (confirmation) => {
     return false;
   }
 
-  if (confirmation.status !== 'pending') {
+  if (confirmation.status === 'cancelled') {
     return false;
+  }
+
+  if (confirmation.status === 'expired') {
+    return true;
   }
 
   const isExpired = new Date(confirmation.expiresAt).getTime() <= Date.now();

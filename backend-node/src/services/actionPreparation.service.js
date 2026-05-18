@@ -29,7 +29,11 @@ const buildSummary = (action, payload, user) => {
   action.requiredFields.forEach((field) => {
     const value = payload[field];
 
-    if (field === 'accountId' || field === 'fromAccountId') {
+    if (
+      field === 'accountId' ||
+      field === 'fromAccountId' ||
+      field === 'sourceAccountId'
+    ) {
       summary.push(`Account: ${getMaskedAccountLabel(value, user)}`);
       return;
     }

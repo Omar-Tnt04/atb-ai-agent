@@ -26,6 +26,15 @@ const mockUsers = [
     phoneNumber: null,
     phoneVerified: false,
   },
+  {
+    id: 'user_client_no_phone_001',
+    fullName: 'Nour No Phone',
+    email: 'client.nophone@atb.com',
+    password: 'client123',
+    role: 'CLIENT',
+    phoneNumber: null,
+    phoneVerified: false,
+  },
 ];
 
 module.exports = mockUsers;
