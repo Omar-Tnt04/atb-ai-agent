@@ -46,3 +46,18 @@ export const cancelAction = async ({ confirmationId, token }) => {
 
   return response.data;
 };
+
+export const verifyAndExecuteAction = async ({ confirmationId, code, token }) => {
+  const response = await apiClient.post(
+    '/agent/actions/verify-and-execute',
+    {
+      confirmationId,
+      code,
+    },
+    {
+      headers: authHeaders(token),
+    },
+  );
+
+  return response.data;
+};

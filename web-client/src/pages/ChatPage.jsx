@@ -4,6 +4,7 @@ import {
   cancelAction,
   confirmAction,
   executeAction,
+  verifyAndExecuteAction,
 } from '../api/actionApi';
 import { sendChatMessage } from '../api/chatApi';
 import {
@@ -37,6 +38,9 @@ function ChatPage() {
   const [actionLoadingText, setActionLoadingText] = useState('');
   const [pendingAction, setPendingAction] = useState(null);
   const [pendingConfirmation, setPendingConfirmation] = useState(null);
+  const [pendingSms, setPendingSms] = useState(null);
+  const [smsCode, setSmsCode] = useState('');
+  const [smsError, setSmsError] = useState('');
 
   useEffect(() => {
     if (!token || !user) {
@@ -117,6 +121,9 @@ function ChatPage() {
       });
       setPendingAction(null);
       setPendingConfirmation(null);
+      setPendingSms(null);
+      setSmsCode('');
+      setSmsError('');
       return;
     }
 
@@ -127,20 +134,31 @@ function ChatPage() {
       });
       setPendingAction(null);
       setPendingConfirmation(response.data);
+      setPendingSms(null);
       return;
     }
 
-    if (
-      response.status === 'high_risk_blocked' ||
-      response.status === 'sms_required'
-    ) {
+    if (response.status === 'sms_required') {
       appendAssistantMessage({
-        text:
-          'This action requires SMS verification. SMS UI will be added in the next step.',
+        text: 'SMS verification is required to complete this secure action.',
         status: response.status,
       });
       setPendingAction(null);
       setPendingConfirmation(null);
+      setPendingSms(response.data);
+      setSmsCode('');
+      setSmsError('');
+      return;
+    }
+
+    if (response.status === 'high_risk_blocked') {
+      appendAssistantMessage({
+        text: 'This action requires SMS verification. SMS UI will be added in the next step.',
+        status: response.status,
+      });
+      setPendingAction(null);
+      setPendingConfirmation(null);
+      setPendingSms(null);
       return;
     }
 
@@ -199,6 +217,9 @@ function ChatPage() {
       if (response.status === 'action_prepared') {
         setPendingAction(response.data?.preparation || null);
         setPendingConfirmation(null);
+        setPendingSms(null);
+        setSmsCode('');
+        setSmsError('');
       }
 
       setMessages((currentMessages) =>
@@ -263,7 +284,11 @@ function ChatPage() {
       return;
     }
 
-    setActionLoadingText('Waiting for confirmation...');
+    setActionLoadingText(
+      pendingConfirmation.riskLevel === 'high'
+        ? 'Sending SMS verification code...'
+        : 'Waiting for confirmation...',
+    );
 
     try {
       const response = await confirmAction({
@@ -278,6 +303,63 @@ function ChatPage() {
           error.response?.data?.message ||
           'I could not confirm this action. Please try again.',
         status: error.response?.data?.status || 'error',
+      });
+    } finally {
+      setActionLoadingText('');
+    }
+  };
+
+  const handleVerifyAndExecute = async () => {
+    if (!pendingSms || actionLoadingText) {
+      return;
+    }
+
+    if (!smsCode.trim()) {
+      setSmsError('Please enter the SMS code.');
+      return;
+    }
+
+    setSmsError('');
+    setActionLoadingText('Verifying SMS code...');
+
+    try {
+      const response = await verifyAndExecuteAction({
+        confirmationId: pendingSms.confirmationId,
+        code: smsCode.trim(),
+        token,
+      });
+
+      setActionLoadingText('Executing secure action...');
+      handleExecutionResponse(response);
+    } catch (error) {
+      const status = error.response?.data?.status || 'error';
+      const attemptsRemaining = error.response?.data?.data?.attemptsRemaining;
+      let text =
+        error.response?.data?.message ||
+        'I could not verify the SMS code. Please try again.';
+
+      if (status === 'sms_invalid' && attemptsRemaining !== undefined) {
+        text = `Invalid SMS code. Attempts remaining: ${attemptsRemaining}.`;
+      }
+
+      if (status === 'sms_expired') {
+        text = 'The SMS code has expired. Please restart the action.';
+      }
+
+      if (status === 'sms_failed') {
+        text = 'SMS verification failed. Please restart the action.';
+      }
+
+      if (status === 'failed') {
+        text =
+          error.response?.data?.message ||
+          'The secure action failed. Please restart the action.';
+      }
+
+      setSmsError(text);
+      appendAssistantMessage({
+        text,
+        status,
       });
     } finally {
       setActionLoadingText('');
@@ -299,12 +381,22 @@ function ChatPage() {
         });
       }
 
+      if (pendingSms?.confirmationId) {
+        await cancelAction({
+          confirmationId: pendingSms.confirmationId,
+          token,
+        });
+      }
+
       appendAssistantMessage({
         text: 'Action cancelled.',
         status: 'cancelled',
       });
       setPendingAction(null);
       setPendingConfirmation(null);
+      setPendingSms(null);
+      setSmsCode('');
+      setSmsError('');
     } catch (error) {
       appendAssistantMessage({
         text:
@@ -436,6 +528,49 @@ function ChatPage() {
               disabled={Boolean(actionLoadingText)}
             >
               Confirm
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleCancelAction}
+              disabled={Boolean(actionLoadingText)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingSms ? (
+        <div className="action-card">
+          <p className="eyebrow">SMS Verification</p>
+          <h2>{pendingSms.actionName}</h2>
+          <p>Confirmation ID: {pendingSms.confirmationId}</p>
+          {pendingSms.maskedPhoneNumber ? (
+            <p>Code sent to: {pendingSms.maskedPhoneNumber}</p>
+          ) : null}
+          {pendingSms.expiresAt ? <p>Expires at: {pendingSms.expiresAt}</p> : null}
+          <label className="sms-code-field">
+            6-digit SMS code
+            <input
+              type="text"
+              inputMode="numeric"
+              value={smsCode}
+              placeholder="123456"
+              maxLength={6}
+              onChange={(event) => setSmsCode(event.target.value)}
+              disabled={Boolean(actionLoadingText)}
+            />
+          </label>
+          {smsError ? <p className="error-text">{smsError}</p> : null}
+          <div className="action-button-row">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleVerifyAndExecute}
+              disabled={Boolean(actionLoadingText)}
+            >
+              Verify and Execute
             </button>
             <button
               type="button"
