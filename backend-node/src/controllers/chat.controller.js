@@ -53,6 +53,15 @@ const createMissingFieldsMessage = (missingFields) => {
   return `Please provide the following information: ${missingFields.join(', ')}.`;
 };
 
+const mergePayloadWithExtractedFields = ({ extractedFields = {}, payload = {} }) => {
+  // Manual payload is entered by the tester/user in the MVP UI, so it must
+  // override rule-based AI extraction when both provide the same field.
+  return {
+    ...extractedFields,
+    ...payload,
+  };
+};
+
 const handleChatMessage = async (req, res) => {
   const { message, payload = {}, conversationHistory = [] } = req.body;
 
@@ -84,9 +93,14 @@ const handleChatMessage = async (req, res) => {
       });
     }
 
+    const finalPayload = mergePayloadWithExtractedFields({
+      extractedFields: ai.extractedFields || {},
+      payload,
+    });
+
     const preparation = prepareAction({
       actionName: ai.actionName,
-      payload,
+      payload: finalPayload,
       user: req.user,
     });
 
@@ -99,6 +113,7 @@ const handleChatMessage = async (req, res) => {
           createMissingFieldsMessage(preparation.body.missingFields),
         data: {
           ai,
+          finalPayload,
           missingFields: preparation.body.missingFields,
         },
       });
@@ -112,6 +127,7 @@ const handleChatMessage = async (req, res) => {
           'I understood your request, but this action is not connected in the current MVP.',
         data: {
           ai,
+          finalPayload,
           actionName: ai.actionName,
         },
       });
@@ -125,6 +141,7 @@ const handleChatMessage = async (req, res) => {
           'I prepared this action. Please review the summary before continuing.',
         data: {
           ai,
+          finalPayload,
           preparation: preparation.body.data,
         },
       });
