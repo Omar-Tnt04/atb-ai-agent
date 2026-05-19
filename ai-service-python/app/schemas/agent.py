@@ -17,6 +17,7 @@ class AgentAnalyzeRequest(BaseModel):
 
 
 class AgentAnalyzeData(BaseModel):
+    source: str
     language: str
     intent: str
     actionName: str | None

@@ -1,5 +1,7 @@
 from app.schemas.agent import AgentAnalyzeRequest, AvailableAction
+from app.config import settings
 from app.services.field_extraction_service import extract_fields
+from app.services.ollama_service import OllamaServiceError, analyze_with_ollama
 from app.utils.language import detect_language
 
 
@@ -66,6 +68,18 @@ INTENT_KEYWORDS = {
     ],
 }
 
+VALID_LANGUAGES = {"english", "french", "arabic", "unknown"}
+VALID_INTENTS = {
+    "check_balance",
+    "view_transactions",
+    "generate_document",
+    "create_complaint",
+    "book_appointment",
+    "pay_bill",
+    "make_transfer",
+    "unknown",
+}
+
 
 def detect_intent(message: str) -> tuple[str, float]:
     normalized_message = message.lower()
@@ -85,6 +99,15 @@ def find_available_action(
         (action for action in available_actions if action.name == intent),
         None,
     )
+
+
+def calculate_missing_fields(
+    action: AvailableAction,
+    extracted_fields: dict,
+) -> list[str]:
+    return [
+        field for field in action.requiredFields if field not in extracted_fields
+    ]
 
 
 def build_assistant_message(
@@ -129,7 +152,7 @@ def build_assistant_message(
     return "I can assist you with this banking action."
 
 
-def analyze_message(request: AgentAnalyzeRequest) -> dict:
+def analyze_message_rule_based(request: AgentAnalyzeRequest) -> dict:
     language = detect_language(request.message)
     intent, confidence = detect_intent(request.message)
     action = find_available_action(intent, request.availableActions)
@@ -142,15 +165,15 @@ def analyze_message(request: AgentAnalyzeRequest) -> dict:
             "confidence": 0.3 if intent == "unknown" else 0.5,
             "missingFields": [],
             "extractedFields": {},
+            "source": "rule_based",
             "assistantMessage": build_assistant_message(intent, action),
         }
 
     extracted_fields = extract_fields(intent, request.message)
-    missing_fields = [
-        field for field in action.requiredFields if field not in extracted_fields
-    ]
+    missing_fields = calculate_missing_fields(action, extracted_fields)
 
     return {
+        "source": "rule_based",
         "language": language,
         "intent": intent,
         "actionName": action.name,
@@ -159,3 +182,78 @@ def analyze_message(request: AgentAnalyzeRequest) -> dict:
         "extractedFields": extracted_fields,
         "assistantMessage": build_assistant_message(intent, action, missing_fields),
     }
+
+
+def _normalize_confidence(value) -> float:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        confidence = 0.5
+
+    return max(0.0, min(1.0, confidence))
+
+
+def _validate_ollama_result(
+    raw_result: dict,
+    request: AgentAnalyzeRequest,
+) -> dict:
+    language = raw_result.get("language", "unknown")
+    intent = raw_result.get("intent", "unknown")
+    action_name = raw_result.get("actionName")
+    extracted_fields = raw_result.get("extractedFields", {})
+    assistant_message = raw_result.get("assistantMessage")
+
+    if language not in VALID_LANGUAGES:
+        language = "unknown"
+
+    if intent not in VALID_INTENTS:
+        raise OllamaServiceError("Ollama returned an invalid intent")
+
+    if not isinstance(extracted_fields, dict):
+        raise OllamaServiceError("Ollama extractedFields must be an object")
+
+    if intent == "unknown" or action_name is None:
+        return {
+            "source": "ollama",
+            "language": language,
+            "intent": "unknown",
+            "actionName": None,
+            "confidence": _normalize_confidence(raw_result.get("confidence", 0.3)),
+            "missingFields": [],
+            "extractedFields": extracted_fields,
+            "assistantMessage": assistant_message
+            or build_assistant_message("unknown", None),
+        }
+
+    if action_name != intent:
+        raise OllamaServiceError("Ollama actionName must match intent")
+
+    action = find_available_action(action_name, request.availableActions)
+
+    if action is None:
+        raise OllamaServiceError("Ollama returned an unavailable action")
+
+    missing_fields = calculate_missing_fields(action, extracted_fields)
+
+    return {
+        "source": "ollama",
+        "language": language,
+        "intent": intent,
+        "actionName": action.name,
+        "confidence": _normalize_confidence(raw_result.get("confidence", 0.5)),
+        "missingFields": missing_fields,
+        "extractedFields": extracted_fields,
+        "assistantMessage": assistant_message
+        or build_assistant_message(intent, action, missing_fields),
+    }
+
+
+def analyze_message(request: AgentAnalyzeRequest) -> dict:
+    if not settings.USE_OLLAMA:
+        return analyze_message_rule_based(request)
+
+    try:
+        ollama_result = analyze_with_ollama(request)
+        return _validate_ollama_result(ollama_result, request)
+    except (OllamaServiceError, ValueError, TypeError, KeyError):
+        return analyze_message_rule_based(request)
