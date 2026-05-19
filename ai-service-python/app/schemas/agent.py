@@ -22,6 +22,7 @@ class AgentAnalyzeData(BaseModel):
     actionName: str | None
     confidence: float
     missingFields: list[str] = Field(default_factory=list)
+    extractedFields: dict[str, Any] = Field(default_factory=dict)
     assistantMessage: str
 
 

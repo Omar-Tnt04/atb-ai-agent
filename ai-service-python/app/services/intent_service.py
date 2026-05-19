@@ -1,4 +1,5 @@
 from app.schemas.agent import AgentAnalyzeRequest, AvailableAction
+from app.services.field_extraction_service import extract_fields
 from app.utils.language import detect_language
 
 
@@ -86,21 +87,40 @@ def find_available_action(
     )
 
 
-def build_assistant_message(intent: str, action: AvailableAction | None) -> str:
+def build_assistant_message(
+    intent: str,
+    action: AvailableAction | None,
+    missing_fields: list[str] | None = None,
+) -> str:
     if intent == "unknown" or action is None:
         return (
             "I understood your message, but I could not identify a connected "
             "banking action yet."
         )
 
+    missing_fields = missing_fields or []
+
+    if intent == "make_transfer":
+        if "sourceAccountId" in missing_fields and "beneficiaryId" in missing_fields:
+            return (
+                "I can assist you with this transfer. Please select the source "
+                "account and beneficiary."
+            )
+        if missing_fields:
+            fields = ", ".join(missing_fields)
+            return f"I can assist you with this transfer. Please provide: {fields}."
+        return "I can assist you with this transfer."
+
     if intent == "pay_bill":
+        if not missing_fields:
+            return "I can assist you with this bill payment."
         return (
             "I can assist you with this bill payment. Please provide the bill "
             "reference and select the source account."
         )
 
-    if action.requiredFields:
-        fields = ", ".join(action.requiredFields)
+    if missing_fields:
+        fields = ", ".join(missing_fields)
         return (
             f"I can assist you with this banking action. Please provide: "
             f"{fields}."
@@ -121,14 +141,21 @@ def analyze_message(request: AgentAnalyzeRequest) -> dict:
             "actionName": None,
             "confidence": 0.3 if intent == "unknown" else 0.5,
             "missingFields": [],
+            "extractedFields": {},
             "assistantMessage": build_assistant_message(intent, action),
         }
+
+    extracted_fields = extract_fields(intent, request.message)
+    missing_fields = [
+        field for field in action.requiredFields if field not in extracted_fields
+    ]
 
     return {
         "language": language,
         "intent": intent,
         "actionName": action.name,
         "confidence": confidence,
-        "missingFields": action.requiredFields,
-        "assistantMessage": build_assistant_message(intent, action),
+        "missingFields": missing_fields,
+        "extractedFields": extracted_fields,
+        "assistantMessage": build_assistant_message(intent, action, missing_fields),
     }
