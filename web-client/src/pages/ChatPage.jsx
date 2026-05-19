@@ -20,6 +20,36 @@ const payloadPlaceholder = `{
   "period": "April 2026"
 }`;
 
+const fieldLabels = {
+  accountId: 'Account ID',
+  sourceAccountId: 'Source Account ID',
+  documentType: 'Document Type',
+  period: 'Period',
+  billReference: 'Bill Reference',
+  beneficiaryId: 'Beneficiary',
+  amount: 'Amount',
+  category: 'Category',
+  description: 'Description',
+  branch: 'Branch',
+  date: 'Date',
+  time: 'Time',
+};
+
+const fieldPlaceholders = {
+  accountId: 'acc_001',
+  sourceAccountId: 'acc_001',
+  documentType: 'statement',
+  period: 'April 2026',
+  billReference: 'OOREDOO-2026-001',
+  beneficiaryId: 'ben_001',
+  amount: '300',
+  category: 'transfer',
+  description: 'My transfer failed',
+  branch: 'Tunis Centre',
+  date: '2026-05-25',
+  time: '10:00',
+};
+
 function ChatPage() {
   const navigate = useNavigate();
   const token = getToken();
@@ -41,6 +71,8 @@ function ChatPage() {
   const [pendingSms, setPendingSms] = useState(null);
   const [smsCode, setSmsCode] = useState('');
   const [smsError, setSmsError] = useState('');
+  const [missingFieldRequest, setMissingFieldRequest] = useState(null);
+  const [missingFieldValues, setMissingFieldValues] = useState({});
 
   useEffect(() => {
     if (!token || !user) {
@@ -112,6 +144,45 @@ function ChatPage() {
     };
   };
 
+  const clearMissingFieldState = () => {
+    setMissingFieldRequest(null);
+    setMissingFieldValues({});
+  };
+
+  const clearPendingInteractionState = () => {
+    setPendingAction(null);
+    setPendingConfirmation(null);
+    setPendingSms(null);
+    clearMissingFieldState();
+  };
+
+  const setChatResponseState = (response, originalMessage) => {
+    if (response.status === 'action_prepared') {
+      setPendingAction(response.data?.preparation || null);
+      setPendingConfirmation(null);
+      setPendingSms(null);
+      setSmsCode('');
+      setSmsError('');
+      clearMissingFieldState();
+      return;
+    }
+
+    if (response.status === 'missing_fields') {
+      setPendingAction(null);
+      setPendingConfirmation(null);
+      setPendingSms(null);
+      setMissingFieldRequest({
+        originalMessage,
+        finalPayload: response.data?.finalPayload || {},
+        missingFields: response.data?.missingFields || [],
+      });
+      setMissingFieldValues({});
+      return;
+    }
+
+    clearPendingInteractionState();
+  };
+
   const handleExecutionResponse = (response) => {
     if (response.status === 'completed') {
       appendAssistantMessage({
@@ -159,6 +230,7 @@ function ChatPage() {
       setPendingAction(null);
       setPendingConfirmation(null);
       setPendingSms(null);
+      clearMissingFieldState();
       return;
     }
 
@@ -214,13 +286,7 @@ function ChatPage() {
         token,
       });
 
-      if (response.status === 'action_prepared') {
-        setPendingAction(response.data?.preparation || null);
-        setPendingConfirmation(null);
-        setPendingSms(null);
-        setSmsCode('');
-        setSmsError('');
-      }
+      setChatResponseState(response, userMessage);
 
       setMessages((currentMessages) =>
         currentMessages
@@ -250,6 +316,60 @@ function ChatPage() {
     } finally {
       setIsSending(false);
     }
+  };
+
+  const handleMissingFieldChange = (field, value) => {
+    setMissingFieldValues((currentValues) => ({
+      ...currentValues,
+      [field]: value,
+    }));
+  };
+
+  const handleSubmitMissingFields = async () => {
+    if (!missingFieldRequest || actionLoadingText) {
+      return;
+    }
+
+    const completedPayload = {
+      ...missingFieldRequest.finalPayload,
+      ...missingFieldValues,
+    };
+
+    setActionLoadingText('Preparing action...');
+
+    try {
+      const response = await sendChatMessage({
+        message: missingFieldRequest.originalMessage,
+        payload: completedPayload,
+        conversationHistory,
+        token,
+      });
+
+      setChatResponseState(response, missingFieldRequest.originalMessage);
+      appendAssistantMessage({
+        text:
+          response.assistantMessage ||
+          'I reviewed the additional information.',
+        status: response.status,
+        details: buildAssistantDetails(response),
+      });
+    } catch {
+      appendAssistantMessage({
+        text:
+          'I could not submit the missing information right now. Please try again.',
+        status: 'error',
+      });
+    } finally {
+      setActionLoadingText('');
+    }
+  };
+
+  const handleCancelMissingFields = () => {
+    clearMissingFieldState();
+    appendAssistantMessage({
+      text: 'Action cancelled. You can start another request.',
+      status: 'cancelled',
+    });
   };
 
   const handleContinueAction = async () => {
@@ -506,6 +626,47 @@ function ChatPage() {
         </div>
       ) : null}
 
+      {missingFieldRequest ? (
+        <div className="action-card missing-field-card">
+          <p className="eyebrow">Missing Information</p>
+          <h2>Complete the action details</h2>
+          <div className="missing-field-grid">
+            {missingFieldRequest.missingFields.map((field) => (
+              <label key={field}>
+                {fieldLabels[field] || field}
+                <input
+                  type={field === 'amount' ? 'number' : 'text'}
+                  value={missingFieldValues[field] || ''}
+                  placeholder={fieldPlaceholders[field] || field}
+                  onChange={(event) =>
+                    handleMissingFieldChange(field, event.target.value)
+                  }
+                  disabled={Boolean(actionLoadingText)}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="action-button-row">
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleSubmitMissingFields}
+              disabled={Boolean(actionLoadingText)}
+            >
+              Submit missing information
+            </button>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleCancelMissingFields}
+              disabled={Boolean(actionLoadingText)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {pendingConfirmation ? (
         <div className="action-card">
           <p className="eyebrow">Confirmation Required</p>
@@ -606,7 +767,7 @@ function ChatPage() {
         </label>
 
         <label className="payload-editor">
-          Temporary payload JSON
+          Advanced payload for testing (optional)
           <textarea
             value={payloadText}
             placeholder={payloadPlaceholder}

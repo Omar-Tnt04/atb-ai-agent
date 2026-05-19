@@ -448,6 +448,33 @@ h2 {
   font-weight: 700;
 }
 
+.missing-field-card {
+  border-color: rgba(0, 90, 139, 0.28);
+}
+
+.missing-field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.missing-field-grid label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.missing-field-grid input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: #ffffff;
+}
+
 .sms-code-field {
   display: grid;
   gap: 8px;
