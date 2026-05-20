@@ -42,13 +42,12 @@ const statusLabels = {
   sms_expired: 'SMS Expired',
   sms_failed: 'SMS Failed',
   file_analyzed: 'File Analyzed',
-  web_searched: 'Web Search',
   file_generated: 'File Generated',
   answered: 'Answered',
 };
 
 const statusTone = (status) => {
-  if (['completed', 'sms_verified', 'file_analyzed', 'web_searched', 'file_generated', 'answered'].includes(status)) {
+  if (['completed', 'sms_verified', 'file_analyzed', 'file_generated', 'answered'].includes(status)) {
     return 'success';
   }
   if (['error', 'failed', 'sms_invalid', 'sms_expired', 'sms_failed'].includes(status)) {
@@ -99,7 +98,6 @@ const saveUserProfile = (user, profile) => {
 const ACTIVITY_LABELS = {
   reading_file: 'Reading uploaded file...',
   extracting: 'Extracting information...',
-  searching_web: 'Searching the web...',
   generating_file: 'Generating your file...',
   preparing_action: 'Preparing secure action...',
   executing_action: 'Executing sandbox action...',
@@ -391,38 +389,6 @@ function GeneratedFileCard({ generatedFile, token }) {
   );
 }
 
-// Web search results card
-function WebSearchResultsCard({ searchResults }) {
-  if (!searchResults || searchResults.length === 0) {
-    return null;
-  }
-
-  return (
-    <InlineAssistantPanel className="web-search-card">
-      <p className="eyebrow">Web search results</p>
-      <ul className="search-result-list">
-        {searchResults.slice(0, 5).map((result, index) => (
-          <li key={`${result.url}-${index}`} className="search-result-item">
-            {result.url ? (
-              <a href={result.url} target="_blank" rel="noopener noreferrer" className="search-result-title">
-                {result.title || result.url}
-              </a>
-            ) : (
-              <span className="search-result-title">{result.title}</span>
-            )}
-            {result.snippet ? (
-              <p className="search-result-snippet">{result.snippet.slice(0, 200)}</p>
-            ) : null}
-            {result.source ? (
-              <span className="search-result-source">{result.source}</span>
-            ) : null}
-          </li>
-        ))}
-      </ul>
-    </InlineAssistantPanel>
-  );
-}
-
 function ChatPage() {
   const navigate = useNavigate();
   const transcriptRef = useRef(null);
@@ -465,9 +431,6 @@ function ChatPage() {
   const [pendingGeneratedFile, setPendingGeneratedFile] = useState(
     initialThread?.pendingGeneratedFile || null,
   );
-  const [pendingSearchResults, setPendingSearchResults] = useState(
-    initialThread?.pendingSearchResults || null,
-  );
   const [agentContext, setAgentContext] = useState(
     initialThread?.agentContext || EMPTY_AGENT_CONTEXT,
   );
@@ -489,7 +452,6 @@ function ChatPage() {
     setSmsCode(thread.smsCode || '');
     setSmsError(thread.smsError || '');
     setPendingGeneratedFile(thread.pendingGeneratedFile || null);
-    setPendingSearchResults(thread.pendingSearchResults || null);
     setAgentContext(thread.agentContext || EMPTY_AGENT_CONTEXT);
     setAssistantActivity('');
     setActionLoadingText('');
@@ -562,7 +524,6 @@ function ChatPage() {
     pendingConfirmation,
     pendingSms,
     pendingGeneratedFile,
-    pendingSearchResults,
   ]);
 
   const conversationHistory = useMemo(
@@ -708,7 +669,6 @@ function ChatPage() {
     setPendingConfirmation(null);
     setPendingSms(null);
     setPendingGeneratedFile(null);
-    setPendingSearchResults(null);
   };
 
   const setChatResponseState = (response) => {
@@ -720,7 +680,6 @@ function ChatPage() {
       setPendingConfirmation(null);
       setPendingSms(null);
       setPendingGeneratedFile(null);
-      setPendingSearchResults(null);
       setSmsCode('');
       setSmsError('');
       updateThreadMetadata({
@@ -728,7 +687,6 @@ function ChatPage() {
         pendingConfirmation: null,
         pendingSms: null,
         pendingGeneratedFile: null,
-        pendingSearchResults: null,
         smsCode: '',
         smsError: '',
       });
@@ -740,13 +698,11 @@ function ChatPage() {
       setPendingConfirmation(null);
       setPendingSms(null);
       setPendingGeneratedFile(null);
-      setPendingSearchResults(null);
       updateThreadMetadata({
         pendingAction: null,
         pendingConfirmation: null,
         pendingSms: null,
         pendingGeneratedFile: null,
-        pendingSearchResults: null,
       });
       return;
     }
@@ -757,30 +713,11 @@ function ChatPage() {
       setPendingConfirmation(null);
       setPendingSms(null);
       setPendingGeneratedFile(generatedFile);
-      setPendingSearchResults(null);
       updateThreadMetadata({
         pendingAction: null,
         pendingConfirmation: null,
         pendingSms: null,
         pendingGeneratedFile: generatedFile,
-        pendingSearchResults: null,
-      });
-      return;
-    }
-
-    if (response.status === 'web_searched' && agentMode === 'web_search') {
-      const searchResults = response.data?.searchResults || null;
-      setPendingAction(null);
-      setPendingConfirmation(null);
-      setPendingSms(null);
-      setPendingGeneratedFile(null);
-      setPendingSearchResults(searchResults);
-      updateThreadMetadata({
-        pendingAction: null,
-        pendingConfirmation: null,
-        pendingSms: null,
-        pendingGeneratedFile: null,
-        pendingSearchResults: searchResults,
       });
       return;
     }
@@ -791,7 +728,6 @@ function ChatPage() {
       pendingConfirmation: null,
       pendingSms: null,
       pendingGeneratedFile: null,
-      pendingSearchResults: null,
     });
     clearPendingInteractionState();
   };
@@ -884,9 +820,6 @@ function ChatPage() {
   const getActivityLabel = (hasFiles, messageText) => {
     if (hasFiles) return ACTIVITY_LABELS.reading_file;
     const lower = (messageText || '').toLowerCase();
-    if (lower.includes('search') || lower.includes('find online') || lower.includes('web')) {
-      return ACTIVITY_LABELS.searching_web;
-    }
     if (lower.includes('generate') || lower.includes('export') || lower.includes('csv') || lower.includes('report')) {
       return ACTIVITY_LABELS.generating_file;
     }
@@ -1454,11 +1387,6 @@ function ChatPage() {
                     generatedFile={pendingGeneratedFile}
                     token={token}
                   />
-                ) : null}
-
-                {/* Web search results card */}
-                {pendingSearchResults ? (
-                  <WebSearchResultsCard searchResults={pendingSearchResults} />
                 ) : null}
 
                 <ChatStatusSticker text={assistantActivity || actionLoadingText} />

@@ -23,7 +23,6 @@ export const createChatThread = () => {
     pendingConfirmation: null,
     pendingSms: null,
     pendingGeneratedFile: null,
-    pendingSearchResults: null,
     smsCode: '',
     smsError: '',
     agentContext: { extractedFields: {}, suggestedAction: null },

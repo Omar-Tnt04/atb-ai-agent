@@ -88,28 +88,6 @@ INTENT_KEYWORDS = {
     ],
 }
 
-# Web search requires strong explicit signals to avoid false positives
-WEB_SEARCH_KEYWORDS = [
-    "search the web",
-    "search online",
-    "search for",
-    "find online",
-    "look up online",
-    "look it up",
-    "web search",
-    "internet search",
-    "search internet",
-    "find on internet",
-    "latest news",
-    "current news",
-    "today's news",
-    "chercher en ligne",
-    "rechercher sur le web",
-    "recherche sur internet",
-    "ابحث على الإنترنت",
-    "بحث في الإنترنت",
-]
-
 # File generation: user wants an exported/downloadable file
 # Excludes banking documents (covered by INTENT_KEYWORDS["generate_document"])
 FILE_GENERATION_KEYWORDS = [
@@ -277,12 +255,6 @@ def _is_file_analysis_request(request: AgentAnalyzeRequest) -> bool:
         return False
     normalized_message = request.message.lower()
     return any(keyword in normalized_message for keyword in FILE_ANALYSIS_KEYWORDS)
-
-
-def _is_web_search_request(message: str) -> bool:
-    """User explicitly requests a live web search."""
-    normalized = message.lower()
-    return any(kw in normalized for kw in WEB_SEARCH_KEYWORDS)
 
 
 def _is_file_generation_request(message: str) -> bool:
@@ -537,24 +509,6 @@ def analyze_uploaded_file(request: AgentAnalyzeRequest) -> dict:
     }
 
 
-def analyze_web_search(request: AgentAnalyzeRequest) -> dict:
-    """agentMode: web_search — backend will trigger web search connector."""
-    language = detect_language(request.message)
-    return {
-        "source": "rule_based",
-        "language": language,
-        "agentMode": "web_search",
-        "intent": "web_search",
-        "actionName": None,
-        "confidence": 0.9,
-        "missingFields": [],
-        "extractedFields": {},
-        "requiredTool": "web_search",
-        "toolInput": {"query": request.message},
-        "assistantMessage": "Searching the web for relevant information...",
-    }
-
-
 def analyze_file_generation(request: AgentAnalyzeRequest) -> dict:
     """agentMode: file_generation — backend will generate a downloadable file."""
     language = detect_language(request.message)
@@ -710,29 +664,24 @@ def _validate_ollama_result(
 
 def analyze_message(request: AgentAnalyzeRequest) -> dict:
     """
-    Classify the request into one of six agent modes and return structured data.
+    Classify the request into one of the supported agent modes and return structured data.
 
     Priority order:
       1. file_analysis     — uploaded file + analysis keywords
-      2. web_search        — explicit web search keywords
-      3. file_generation   — file export/generation keywords (non-banking)
-      4. banking_action    — detected banking intent (Ollama or rule-based)
-      5. informational_answer — default fallback
+      2. file_generation   — file export/generation keywords (non-banking)
+      3. banking_action    — detected banking intent (Ollama or rule-based)
+      4. informational_answer — default fallback
     """
     # 1. File analysis
     if _is_file_analysis_request(request):
         return analyze_uploaded_file(request)
 
-    # 2. Web search
-    if _is_web_search_request(request.message):
-        return analyze_web_search(request)
-
-    # 3. File generation (checked before banking to avoid Ollama interference)
+    # 2. File generation (checked before banking to avoid Ollama interference)
     #    _is_file_generation_request already excludes banking document keywords
     if _is_file_generation_request(request.message):
         return analyze_file_generation(request)
 
-    # 4. Banking intent detection (Ollama when enabled, rule-based fallback)
+    # 3. Banking intent detection (Ollama when enabled, rule-based fallback)
     if settings.USE_OLLAMA:
         try:
             ollama_result = analyze_with_ollama(request)
@@ -749,5 +698,5 @@ def analyze_message(request: AgentAnalyzeRequest) -> dict:
         except (OllamaServiceError, ValueError, TypeError, KeyError):
             pass
 
-    # 5. Rule-based banking / informational fallback
+    # 4. Rule-based banking / informational fallback
     return analyze_message_rule_based(request)

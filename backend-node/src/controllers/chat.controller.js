@@ -6,7 +6,6 @@ const { analyzeMessage } = require('../services/aiClient.service');
 const { createAuditLog } = require('../services/auditLog.service');
 const { buildFileContext } = require('../services/fileContext.service');
 const { generateFile } = require('../services/generatedFile.service');
-const { searchWeb } = require('../connectors/web/webSearch.connector');
 
 const toAiAction = (action) => ({
   name: action.name,
@@ -193,24 +192,6 @@ const createFileChatAuditLog = ({ req, fileContext }) =>
     },
   });
 
-// Build a human-readable answer from web search results
-const buildWebSearchAssistantMessage = (results, fallbackMessage) => {
-  if (!results || results.length === 0) {
-    return (
-      fallbackMessage ||
-      'I searched the web but could not find relevant results for your query.'
-    );
-  }
-
-  const lines = results.slice(0, 3).map((r, i) => {
-    const title = r.title ? `**${r.title}**` : `Result ${i + 1}`;
-    const snippet = r.snippet ? ` — ${r.snippet.slice(0, 200)}` : '';
-    return `${i + 1}. ${title}${snippet}`;
-  });
-
-  return `Here are the web search results:\n\n${lines.join('\n\n')}`;
-};
-
 // Summarise conversation history as plain text for file generation
 const buildConversationSummary = (conversationHistory = []) => {
   if (!conversationHistory.length) {
@@ -265,68 +246,6 @@ const handleFileAnalysisMode = (res, ai, fileContext) => {
     agentMode: 'file_analysis',
     assistantMessage: ai.assistantMessage,
     data: { ai, ...fileData },
-  });
-};
-
-const handleWebSearchMode = async (res, req, ai, message, fileContext) => {
-  const query = (ai.toolInput && ai.toolInput.query) || message;
-  const searchResult = await searchWeb({ query });
-
-  const fileData = fileContext
-    ? {
-        fileContext: {
-          files: buildSafeFileAttachments(fileContext),
-          extractedContextUsed: Boolean(fileContext.combinedText),
-        },
-      }
-    : {};
-
-  createAuditLog({
-    userId: req.user.id,
-    role: req.user.role,
-    status: 'web_search_performed',
-    apiEndpoint: req.originalUrl || '/chat/message',
-    metadata: { query, provider: process.env.WEB_SEARCH_PROVIDER || 'tavily' },
-    result: { success: searchResult.success, resultCount: searchResult.results.length },
-  });
-
-  if (!searchResult.success && searchResult.unavailable) {
-    return res.json({
-      success: true,
-      status: 'answered',
-      agentMode: 'informational_answer',
-      assistantMessage:
-        'Web search is not configured yet. I can answer from uploaded files or available internal context.',
-      data: { ai, ...fileData },
-    });
-  }
-
-  if (!searchResult.success) {
-    return res.json({
-      success: true,
-      status: 'answered',
-      agentMode: 'informational_answer',
-      assistantMessage:
-        'I tried to search the web but the search request failed. Please try again later.',
-      data: { ai, ...fileData },
-    });
-  }
-
-  const assistantMessage = buildWebSearchAssistantMessage(
-    searchResult.results,
-    ai.assistantMessage,
-  );
-
-  return res.json({
-    success: true,
-    status: 'web_searched',
-    agentMode: 'web_search',
-    assistantMessage,
-    data: {
-      ai,
-      searchResults: searchResult.results || [],
-      ...fileData,
-    },
   });
 };
 
@@ -474,11 +393,6 @@ const dispatchByAgentMode = async ({
   // file_analysis
   if (agentMode === 'file_analysis') {
     return handleFileAnalysisMode(res, ai, fileContext);
-  }
-
-  // web_search
-  if (agentMode === 'web_search') {
-    return handleWebSearchMode(res, req, ai, message, fileContext);
   }
 
   // file_generation
