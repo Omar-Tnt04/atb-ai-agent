@@ -3,6 +3,8 @@
 .env.local
 dist/
 build/
+uploads/
+backend-node/uploads/
 __pycache__/
 *.pyc
 venv/

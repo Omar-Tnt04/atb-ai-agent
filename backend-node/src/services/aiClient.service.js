@@ -6,12 +6,16 @@ const analyzeMessage = async ({
   userRole,
   availableActions,
   conversationHistory,
+  fileContext,
+  profileContext,
 }) => {
   const response = await axios.post(`${env.aiServiceUrl}/agent/analyze`, {
     message,
     userRole,
     availableActions,
     conversationHistory,
+    fileContext,
+    profileContext,
   });
 
   return response.data;

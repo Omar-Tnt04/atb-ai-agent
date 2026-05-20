@@ -1,0 +1,58 @@
+$ErrorActionPreference = "Stop"
+
+$rootPath = Resolve-Path (Join-Path $PSScriptRoot "..")
+
+Write-Host ""
+Write-Host "ATB AI Banking Agent - Local Development" -ForegroundColor Cyan
+Write-Host "Backend:  http://localhost:5000"
+Write-Host "AI:       http://localhost:8000"
+Write-Host "Frontend: http://localhost:5173"
+Write-Host ""
+
+function Start-DevWindow {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string] $Title,
+
+        [Parameter(Mandatory = $true)]
+        [string] $RelativePath,
+
+        [Parameter(Mandatory = $true)]
+        [string] $Command
+    )
+
+    $workingDirectory = Join-Path $rootPath $RelativePath
+
+    if (-not (Test-Path $workingDirectory)) {
+        throw "Directory not found: $workingDirectory"
+    }
+
+    $windowCommand = @"
+`$Host.UI.RawUI.WindowTitle = "$Title"
+Set-Location -LiteralPath "$workingDirectory"
+$Command
+"@
+
+    Start-Process powershell.exe -ArgumentList @(
+        "-NoExit",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        $windowCommand
+    )
+}
+
+Start-DevWindow `
+    -Title "ATB Backend" `
+    -RelativePath "backend-node" `
+    -Command "npm run dev"
+
+Start-DevWindow `
+    -Title "ATB AI Service" `
+    -RelativePath "ai-service-python" `
+    -Command ".\venv\Scripts\Activate.ps1; uvicorn app.main:app --reload --port 8000"
+
+Start-DevWindow `
+    -Title "ATB Frontend" `
+    -RelativePath "web-client" `
+    -Command "npm run dev"

@@ -1,4 +1,7 @@
 const { getActionByName } = require('../actions/actionRegistry');
+const {
+  executeConnectorOperation,
+} = require('../connectors/connectorRegistry');
 const mockAccounts = require('../data/mockAccounts');
 const mockBeneficiaries = require('../data/mockBeneficiaries');
 const mockBills = require('../data/mockBills');
@@ -9,7 +12,7 @@ const {
 const mockComplaints = require('../data/mockComplaints');
 const mockDocuments = require('../data/mockDocuments');
 const mockTransactions = require('../data/mockTransactions');
-const { buildSummary } = require('./actionPreparation.service');
+const { buildSummary, getExecutionMode } = require('./actionPreparation.service');
 const { createAuditLog } = require('./auditLog.service');
 const {
   createPendingConfirmation,
@@ -165,7 +168,16 @@ const canViewComplaint = (user, complaint) => {
   );
 };
 
-const executeConnectedAction = ({ actionName, payload, user }) => {
+const executeConnectedAction = async ({ action, actionName, payload, user }) => {
+  if (action?.connector && action?.operation) {
+    return executeConnectorOperation({
+      connectorName: action.connector,
+      operationName: action.operation,
+      user,
+      payload,
+    });
+  }
+
   switch (actionName) {
     case 'check_balance': {
       const account = getClientAccount(user, payload.accountId);
@@ -430,6 +442,9 @@ const createExecutionLog = ({
   confirmationId,
   confirmationStatus,
   smsVerificationStatus,
+  connectorSource,
+  fallbackUsed,
+  fallbackReason,
 }) => {
   return createAuditLog({
     userId: user.id,
@@ -444,6 +459,11 @@ const createExecutionLog = ({
     confirmationId,
     confirmationStatus,
     smsVerificationStatus,
+    connectorName: action?.connector,
+    operationName: action?.operation,
+    connectorSource,
+    fallbackUsed,
+    fallbackReason,
   });
 };
 
@@ -552,7 +572,7 @@ const validateActionRequest = ({ actionName, payload, user }) => {
   };
 };
 
-const executeValidatedAction = ({
+const executeValidatedAction = async ({
   action,
   actionName,
   payload,
@@ -562,7 +582,12 @@ const executeValidatedAction = ({
   smsVerificationStatus,
   failureAuditStatus,
 }) => {
-  const executionResult = executeConnectedAction({ actionName, payload, user });
+  const executionResult = await executeConnectedAction({
+    action,
+    actionName,
+    payload,
+    user,
+  });
 
   if (!executionResult.success) {
     createExecutionLog({
@@ -575,6 +600,9 @@ const executeValidatedAction = ({
       confirmationId,
       confirmationStatus,
       smsVerificationStatus,
+      connectorSource: executionResult.source,
+      fallbackUsed: executionResult.fallbackUsed,
+      fallbackReason: executionResult.fallbackReason,
     });
 
     return {
@@ -587,6 +615,13 @@ const executeValidatedAction = ({
     };
   }
 
+  const executionMode =
+    executionResult.source === 'external'
+      ? 'external'
+      : executionResult.source === 'sandbox'
+        ? 'sandbox'
+        : getExecutionMode(action);
+
   createExecutionLog({
     user,
     action,
@@ -597,6 +632,9 @@ const executeValidatedAction = ({
     confirmationId,
     confirmationStatus,
     smsVerificationStatus,
+    connectorSource: executionResult.source || executionMode,
+    fallbackUsed: executionResult.fallbackUsed,
+    fallbackReason: executionResult.fallbackReason,
   });
 
   return {
@@ -605,12 +643,20 @@ const executeValidatedAction = ({
       success: true,
       status: 'completed',
       message: 'Action executed successfully',
-      data: executionResult.data,
+      executionMode,
+      fallbackUsed: Boolean(executionResult.fallbackUsed),
+      fallbackReason: executionResult.fallbackReason || null,
+      data: {
+        ...executionResult.data,
+        executionMode,
+        fallbackUsed: Boolean(executionResult.fallbackUsed),
+        fallbackReason: executionResult.fallbackReason || null,
+      },
     },
   };
 };
 
-const executeAction = ({ actionName, payload = {}, user }) => {
+const executeAction = async ({ actionName, payload = {}, user }) => {
   const validation = validateActionRequest({ actionName, payload, user });
 
   if (validation.body) {
@@ -690,6 +736,7 @@ const executeAction = ({ actionName, payload = {}, user }) => {
           actionName,
           riskLevel: action.riskLevel,
           requiresSmsVerification: action.requiresSmsVerification,
+          executionMode: getExecutionMode(action),
           summary,
           ...(action.riskLevel === 'high'
             ? { maskedPhoneNumber: maskPhoneNumber(user.phoneNumber) }
@@ -708,7 +755,7 @@ const executeAction = ({ actionName, payload = {}, user }) => {
   });
 };
 
-const confirmAction = ({ confirmationId, user }) => {
+const confirmAction = async ({ confirmationId, user }) => {
   if (!confirmationId) {
     createExecutionLog({
       user,
@@ -889,7 +936,7 @@ const confirmAction = ({ confirmationId, user }) => {
   });
 };
 
-const cancelAction = ({ confirmationId, user }) => {
+const cancelAction = async ({ confirmationId, user }) => {
   if (!confirmationId) {
     createExecutionLog({
       user,
@@ -998,7 +1045,7 @@ const cancelAction = ({ confirmationId, user }) => {
   };
 };
 
-const verifyAndExecuteAction = ({ confirmationId, code, user }) => {
+const verifyAndExecuteAction = async ({ confirmationId, code, user }) => {
   const missingFields = [
     ...(!confirmationId ? ['confirmationId'] : []),
     ...(!code ? ['code'] : []),

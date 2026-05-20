@@ -26,11 +26,11 @@ const prepareAgentAction = (req, res) => {
   return res.status(result.httpStatus).json(result.body);
 };
 
-const executeAgentAction = (req, res) => {
+const executeAgentAction = async (req, res) => {
   const { actionName, payload = {} } = req.body;
 
   if (!actionName) {
-    const result = executeAction({
+    const result = await executeAction({
       actionName,
       payload,
       user: req.user,
@@ -39,7 +39,7 @@ const executeAgentAction = (req, res) => {
     return res.status(result.httpStatus).json(result.body);
   }
 
-  const result = executeAction({
+  const result = await executeAction({
     actionName,
     payload,
     user: req.user,
@@ -48,10 +48,10 @@ const executeAgentAction = (req, res) => {
   return res.status(result.httpStatus).json(result.body);
 };
 
-const confirmAgentAction = (req, res) => {
+const confirmAgentAction = async (req, res) => {
   const { confirmationId } = req.body;
 
-  const result = confirmAction({
+  const result = await confirmAction({
     confirmationId,
     user: req.user,
   });
@@ -59,10 +59,10 @@ const confirmAgentAction = (req, res) => {
   return res.status(result.httpStatus).json(result.body);
 };
 
-const cancelAgentAction = (req, res) => {
+const cancelAgentAction = async (req, res) => {
   const { confirmationId } = req.body;
 
-  const result = cancelAction({
+  const result = await cancelAction({
     confirmationId,
     user: req.user,
   });
@@ -70,10 +70,10 @@ const cancelAgentAction = (req, res) => {
   return res.status(result.httpStatus).json(result.body);
 };
 
-const verifyAndExecuteAgentAction = (req, res) => {
+const verifyAndExecuteAgentAction = async (req, res) => {
   const { confirmationId, code } = req.body;
 
-  const result = verifyAndExecuteAction({
+  const result = await verifyAndExecuteAction({
     confirmationId,
     code,
     user: req.user,

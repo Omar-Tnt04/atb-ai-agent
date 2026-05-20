@@ -5,6 +5,7 @@ from typing import Any
 # Temporary rule-based extractor for the MVP.
 # This will be replaced later by Ollama-based structured field extraction.
 ACCOUNT_ID_PATTERN = re.compile(r"\bacc_\d+\b", re.IGNORECASE)
+BENEFICIARY_ID_PATTERN = re.compile(r"\bben_\d+\b", re.IGNORECASE)
 BILL_REFERENCE_PATTERN = re.compile(
     r"\b(?:STEG|SONEDE|OOREDOO)-\d{4}-\d{3}\b",
     re.IGNORECASE,
@@ -152,16 +153,23 @@ def extract_fields(intent: str, message: str) -> dict[str, Any]:
     if intent == "make_transfer":
         amount = _extract_amount(message)
         beneficiary_name = _extract_beneficiary_name(message)
+        beneficiary_id = BENEFICIARY_ID_PATTERN.search(message)
+        account_id = _extract_account_id(message)
 
         if amount is not None:
             fields["amount"] = amount
         if beneficiary_name:
             fields["beneficiaryName"] = beneficiary_name
+        if beneficiary_id:
+            fields["beneficiaryId"] = beneficiary_id.group(0).lower()
+        if account_id:
+            fields["sourceAccountId"] = account_id
 
     if intent == "pay_bill":
         bill_reference = BILL_REFERENCE_PATTERN.search(message)
         account_id = _extract_account_id(message)
         provider = _extract_provider(message)
+        amount = _extract_amount(message)
 
         if bill_reference:
             fields["billReference"] = bill_reference.group(0).upper()
@@ -169,6 +177,8 @@ def extract_fields(intent: str, message: str) -> dict[str, Any]:
             fields["provider"] = provider
         if account_id:
             fields["sourceAccountId"] = account_id
+        if amount is not None:
+            fields["amount"] = amount
 
     if intent == "generate_document":
         period = PERIOD_PATTERN.search(message)

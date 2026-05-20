@@ -1,0 +1,34 @@
+{
+  "name": "atb-ai-agent",
+  "version": "1.0.0",
+  "description": "Local MVP / Proof of Concept for a secure AI banking assistant for ATB.",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "dev": "node scripts/dev/start.js",
+    "dev:verbose": "concurrently --kill-others-on-fail --prefix \"[{name}]\" --names \"api,ai,web\" --prefix-colors \"blue,magenta,green\" \"npm run dev:backend\" \"npm run dev:ai\" \"npm run dev:web\"",
+    "dev:combined": "concurrently --kill-others-on-fail --prefix \"[{name}]\" --names \"api,ai,web\" --prefix-colors \"blue,magenta,green\" \"npm run dev:backend\" \"npm run dev:ai\" \"npm run dev:web\"",
+    "dev:separate": "powershell -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
+    "dev:backend": "cd backend-node && npm run dev",
+    "dev:ai": "cd ai-service-python && .\\venv\\Scripts\\python.exe -m uvicorn app.main:app --reload --port 8000 --log-level warning",
+    "dev:web": "cd web-client && npm run dev -- --clearScreen false",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Omar-Tnt04/atb-ai-agent.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/Omar-Tnt04/atb-ai-agent/issues"
+  },
+  "homepage": "https://github.com/Omar-Tnt04/atb-ai-agent#readme",
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

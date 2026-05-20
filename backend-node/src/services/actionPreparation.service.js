@@ -1,7 +1,42 @@
 const { getActionByName } = require('../actions/actionRegistry');
+const {
+  getSafeServiceStatus,
+} = require('../connectors/external/externalService.config');
 const mockAccounts = require('../data/mockAccounts');
 const { maskAccountNumber } = require('../utils/mask');
 const { getMissingFields } = require('../utils/validation');
+
+// Maps an action category to its external service name (externalService.config).
+const CATEGORY_EXTERNAL_SERVICE = {
+  payments: 'payment',
+  documents: 'document',
+  complaints: 'complaint',
+  appointments: 'appointment',
+};
+
+// Determines whether an action will run against a real external connector or
+// the sandbox/demo connector. Used to label the workflow honestly in the UI.
+const getExecutionMode = (action) => {
+  if (!action || action.status !== 'connected') {
+    return 'none';
+  }
+
+  const connector = action.connector || '';
+
+  if (connector.startsWith('hybrid')) {
+    const serviceName = CATEGORY_EXTERNAL_SERVICE[action.category];
+
+    if (!serviceName) {
+      return 'sandbox';
+    }
+
+    const status = getSafeServiceStatus(serviceName);
+    return status.enabled && status.configured ? 'external' : 'sandbox';
+  }
+
+  // sandbox*, mock*, or internal switch-handled actions all run in sandbox mode.
+  return 'sandbox';
+};
 
 const formatFieldLabel = (field) => {
   return field
@@ -98,6 +133,8 @@ const prepareAction = ({ actionName, payload = {}, user }) => {
     };
   }
 
+  const executionMode = getExecutionMode(action);
+
   return {
     httpStatus: 200,
     body: {
@@ -112,6 +149,8 @@ const prepareAction = ({ actionName, payload = {}, user }) => {
         requiresSmsVerification: action.requiresSmsVerification,
         apiEndpoint: action.apiEndpoint,
         method: action.method,
+        executionMode,
+        externalConnectorConfigured: executionMode === 'external',
         payload,
         summary: buildSummary(action, payload, user),
       },
@@ -121,5 +160,6 @@ const prepareAction = ({ actionName, payload = {}, user }) => {
 
 module.exports = {
   buildSummary,
+  getExecutionMode,
   prepareAction,
 };

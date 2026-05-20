@@ -1,64 +1,124 @@
 import { useState } from 'react';
-import apiClient from '../api/client';
+import { Link, useNavigate } from 'react-router-dom';
+import { login } from '../api/authApi';
+import Button from '../components/Button.jsx';
+import Logo from '../components/Logo.jsx';
+import { getToken, getUser, saveToken, saveUser } from '../utils/authStorage';
+import { getRoleHomePath, isAdminRole } from '../utils/roleLabels';
 
 function HomePage() {
-  const [health, setHealth] = useState(null);
+  const navigate = useNavigate();
+  const user = getUser();
+  const isLoggedIn = Boolean(getToken() && user);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const testBackendConnection = async () => {
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setIsLoading(true);
     setError('');
 
     try {
-      const response = await apiClient.get('/health');
-      setHealth(response.data);
+      const data = await login(email, password);
+      saveToken(data.token);
+      saveUser(data.user);
+      navigate(getRoleHomePath(data.user?.role));
     } catch (requestError) {
-      setHealth(null);
-      setError(
+      const message =
         requestError.response?.data?.message ||
-          requestError.message ||
-          'Unable to reach backend',
-      );
+        'We could not sign you in. Please check your credentials and try again.';
+      setError(message);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <section className="page-grid">
-      <div className="hero-panel">
-        <p className="eyebrow">ATB AI Banking Agent MVP</p>
-        <h1>Simple banking support, prepared for secure automation.</h1>
-        <p className="lead">
-          A clean web shell for the customer-facing agent experience, ready for
-          authentication, chat, and banking modules in later phases.
-        </p>
+    <section className="home-page">
+      <div className="home-split-panel home-split-panel-brand">
+        <div className="home-main">
+          <div className="home-brand">
+            <Logo />
+          </div>
 
-        <button
-          type="button"
-          className="primary-button"
-          onClick={testBackendConnection}
-          disabled={isLoading}
-        >
-          {isLoading ? 'Checking backend...' : 'Test backend connection'}
-        </button>
+          <p className="eyebrow">ATB Digital Banking Assistant</p>
+          
+        </div>
       </div>
 
-      <aside className="status-panel" aria-live="polite">
-        <div className="panel-header">
-          <span className="status-dot" aria-hidden="true" />
-          <h2>Backend Health</h2>
-        </div>
+      <div className="home-split-panel home-split-panel-auth">
+        <section className="home-auth-panel" aria-labelledby="home-auth-title">
+          {isLoggedIn ? (
+            <div className="signed-in-panel">
+              <p className="eyebrow">Secure session active</p>
+              <h2 id="home-auth-title">Continue your ATB session</h2>
+              <p className="muted">
+                You are signed in as {isAdminRole(user?.role) ? 'ADMIN' : 'USER'}.
+              </p>
+              <Button as={Link} to={getRoleHomePath(user.role)}>
+                {isAdminRole(user?.role) ? 'Open dashboard' : 'Open chat'}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <div className="auth-heading">
+                <h2 id="home-auth-title">Sign in</h2>
+                <p className="muted">
+                  Use your ATB credentials to enter the assistant workspace.
+                </p>
+              </div>
 
-        {health ? (
-          <pre className="response-box">{JSON.stringify(health, null, 2)}</pre>
-        ) : (
-          <p className="muted">No backend response yet.</p>
-        )}
+              <form className="login-form" onSubmit={handleSubmit}>
+                <label>
+                  Email address
+                  <input
+                    type="email"
+                    value={email}
+                    placeholder="user@atb.com"
+                    autoComplete="email"
+                    onChange={(event) => setEmail(event.target.value)}
+                    required
+                  />
+                </label>
 
-        {error ? <p className="error-text">{error}</p> : null}
-      </aside>
+                <label>
+                  Password
+                  <input
+                    type="password"
+                    value={password}
+                    placeholder="Password"
+                    autoComplete="current-password"
+                    onChange={(event) => setPassword(event.target.value)}
+                    required
+                  />
+                </label>
+
+                <Button type="submit" disabled={isLoading}>
+                  {isLoading ? 'Signing in...' : 'Sign in'}
+                </Button>
+
+                {error ? <p className="error-text" role="alert">{error}</p> : null}
+              </form>
+
+              <div className="demo-panel">
+                <p className="eyebrow">Demo credentials</p>
+                <div className="credential-list">
+                  <p>
+                    <strong>USER</strong>
+                    <span>user@atb.com / user123</span>
+                  </p>
+                  <p>
+                    <strong>ADMIN</strong>
+                    <span>admin@atb.com / admin123</span>
+                  </p>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+      </div>
     </section>
   );
 }
