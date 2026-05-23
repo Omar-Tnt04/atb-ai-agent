@@ -18,6 +18,7 @@ const integrationRoutes = require('./routes/integration.routes');
 const resourceRoutes = require('./routes/resource.routes');
 const smsVerificationRoutes = require('./routes/smsVerification.routes');
 const transferRoutes = require('./routes/transfer.routes');
+const widgetDemoRoutes = require('./routes/widgetDemo.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/error.middleware');
 
 const app = express();
@@ -42,6 +43,7 @@ app.use('/mock/complaints', complaintRoutes);
 app.use('/mock/appointments', appointmentRoutes);
 app.use('/mock/transfers', transferRoutes);
 app.use('/sms', smsVerificationRoutes);
+app.use('/api/widget', widgetDemoRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

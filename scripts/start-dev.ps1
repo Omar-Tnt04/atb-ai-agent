@@ -7,6 +7,7 @@ Write-Host "ATB AI Banking Agent - Local Development" -ForegroundColor Cyan
 Write-Host "Backend:  http://localhost:5000"
 Write-Host "AI:       http://localhost:8000"
 Write-Host "Frontend: http://localhost:5173"
+Write-Host "Widget:   http://localhost:5174"
 Write-Host ""
 
 function Start-DevWindow {
@@ -55,4 +56,9 @@ Start-DevWindow `
 Start-DevWindow `
     -Title "ATB Frontend" `
     -RelativePath "web-client" `
+    -Command "npm run dev"
+
+Start-DevWindow `
+    -Title "ATB Widget" `
+    -RelativePath "widget-agent" `
     -Command "npm run dev"

@@ -24,6 +24,12 @@ const services = [
     readyPattern: /local:|localhost:5173|127\.0\.0\.1:5173/i,
   },
   {
+    name: "widget",
+    url: "http://localhost:5174",
+    script: path.join(__dirname, "widget.js"),
+    readyPattern: /local:|localhost:5174|127\.0\.0\.1:5174/i,
+  },
+  {
     name: "pay",
     url: "http://localhost:7101",
     script: path.join(internalServicesDir, "payment-service", "server.js"),
@@ -61,8 +67,9 @@ let shuttingDown = false;
 console.log("========================================");
 console.log(" ATB AI Banking Agent - Local MVP");
 console.log("========================================");
-console.log(" Open the app:");
-console.log(" http://localhost:5173");
+console.log(" Open the apps:");
+console.log("[web]     http://localhost:5173");
+console.log("[widget]  http://localhost:5174");
 console.log("");
 console.log(" Core services:");
 console.log(" Backend API: http://localhost:5000/health");
