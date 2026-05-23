@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAllAuditLogs } from '../api/auditApi';
-import { getConnectors, getExternalStatus } from '../api/integrationApi';
+import { getConnectors, getInternalServiceStatus } from '../api/integrationApi';
 import Badge from '../components/Badge.jsx';
 import Button from '../components/Button.jsx';
 import Card from '../components/Card.jsx';
@@ -23,17 +23,26 @@ const statusLabels = {
   missing_fields: 'Missing Fields',
   not_connected: 'Not Connected',
   sms_failed: 'SMS Failed',
+  service_unavailable: 'Service Unavailable',
 };
 
 const CONNECTOR_CATEGORY_ORDER = [
+  'ATB',
   'Documents',
   'Payments',
-  'Complaints',
   'Appointments',
   'Transfers',
   'Notifications',
   'Other',
 ];
+
+const SERVICE_DISPLAY_LABELS = {
+  atb: 'ATB',
+};
+
+const SERVICE_DESCRIPTION_LABELS = {
+  atb: 'General ATB internal service',
+};
 
 const formatDate = (value) => {
   if (!value) return '-';
@@ -58,9 +67,17 @@ const formatLabel = (value = '') => {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 };
 
+const formatServiceName = (value = '') =>
+  SERVICE_DISPLAY_LABELS[String(value).toLowerCase()] || formatLabel(value);
+
+const formatServiceDescription = (value = '') =>
+  SERVICE_DESCRIPTION_LABELS[String(value).toLowerCase()] ||
+  `ATB ${formatServiceName(value)} internal service`;
+
 const statusTone = (status) => {
   if (['completed', 'sms_verified'].includes(status)) return 'success';
-  if (['failed', 'sms_failed', 'cancelled'].includes(status)) return 'danger';
+  if (['failed', 'sms_failed', 'cancelled', 'service_unavailable'].includes(status))
+    return 'danger';
 
   if (
     ['confirmation_required', 'sms_required', 'missing_fields'].includes(status)
@@ -78,10 +95,16 @@ const riskTone = (riskLevel) => {
   return 'neutral';
 };
 
+const serviceStatusLabel = (service) => {
+  if (!service.enabled) return 'Disabled';
+  if (service.status === 'connected') return 'Connected';
+  return 'Offline';
+};
+
 const serviceTone = (service) => {
-  if (service.enabled && service.configured) return 'success';
-  if (service.enabled && !service.configured) return 'warning';
-  return 'neutral';
+  if (!service.enabled) return 'neutral';
+  if (service.status === 'connected') return 'success';
+  return 'danger';
 };
 
 const getConnectorCategory = (connector) => {
@@ -89,7 +112,7 @@ const getConnectorCategory = (connector) => {
 
   if (source.includes('document')) return 'Documents';
   if (source.includes('payment') || source.includes('bill')) return 'Payments';
-  if (source.includes('complaint')) return 'Complaints';
+  if (source.includes('atb') || source.includes('complaint')) return 'ATB';
   if (source.includes('appointment')) return 'Appointments';
   if (source.includes('transfer')) return 'Transfers';
   if (source.includes('notification') || source.includes('sms')) return 'Notifications';
@@ -97,14 +120,25 @@ const getConnectorCategory = (connector) => {
 };
 
 const getLogMode = (log) => {
-  if (log.fallbackUsed) return 'Sandbox fallback';
-  if (log.connectorSource === 'external') return 'External';
-  if (log.connectorSource === 'sandbox') return 'Sandbox';
-  return formatLabel(log.connectorSource || 'Internal demo');
+  if (log.connectorSource === 'internal_demo_service') return 'Internal demo service';
+  return formatLabel(log.connectorSource || 'Internal demo service');
 };
 
-const getAuditReference = (log) =>
-  log.confirmationId || log.result?.reference || log.result?.id || log.id;
+const getAuditReference = (log) => {
+  const result = log.result || {};
+
+  return (
+    result.paymentReference ||
+    result.transferReference ||
+    result.complaint?.reference ||
+    result.appointment?.appointmentId ||
+    result.document?.documentId ||
+    result.reference ||
+    result.id ||
+    log.confirmationId ||
+    log.id
+  );
+};
 
 function DashboardPage() {
   const navigate = useNavigate();
@@ -112,7 +146,7 @@ function DashboardPage() {
   const [user] = useState(() => getUser());
   const [logs, setLogs] = useState([]);
   const [connectors, setConnectors] = useState([]);
-  const [externalStatuses, setExternalStatuses] = useState([]);
+  const [serviceStatuses, setServiceStatuses] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -123,16 +157,16 @@ function DashboardPage() {
     setErrorMessage('');
 
     try {
-      const [auditResponse, connectorResponse, externalStatusResponse] =
+      const [auditResponse, connectorResponse, serviceStatusResponse] =
         await Promise.all([
           getAllAuditLogs(token),
           getConnectors(token),
-          getExternalStatus(token),
+          getInternalServiceStatus(token),
         ]);
 
       setLogs(auditResponse.data || []);
       setConnectors(connectorResponse.data || []);
-      setExternalStatuses(externalStatusResponse.data || []);
+      setServiceStatuses(serviceStatusResponse.data || []);
     } catch (error) {
       setErrorMessage(
         error.response?.data?.message ||
@@ -165,7 +199,14 @@ function DashboardPage() {
       failed: logs.filter((log) =>
         ['failed', 'sms_failed', 'cancelled'].includes(log.status),
       ).length,
-      fallback: logs.filter((log) => log.fallbackUsed).length,
+      internalServiceActions: logs.filter(
+        (log) =>
+          log.connectorSource === 'internal_demo_service' &&
+          log.status === 'completed',
+      ).length,
+      offlineServiceErrors: logs.filter(
+        (log) => log.status === 'service_unavailable',
+      ).length,
       highRisk: logs.filter((log) => log.riskLevel === 'high').length,
       total: logs.length,
     }),
@@ -188,14 +229,18 @@ function DashboardPage() {
   }, [connectors]);
 
   const recentLogs = useMemo(() => logs.slice().reverse().slice(0, 12), [logs]);
-  const currentMode = 'Sandbox / Internal service demo';
+  const currentMode = 'Internal demo services';
 
   const kpis = [
     { label: 'Total audit logs', value: summary.total },
     { label: 'Completed actions', value: summary.completed },
-    { label: 'Failed actions', value: summary.failed },
+    { label: 'Internal service actions', value: summary.internalServiceActions },
     { label: 'High-risk actions', value: summary.highRisk },
-    { label: 'Sandbox / fallback actions', value: summary.fallback, accent: true },
+    {
+      label: 'Offline service errors',
+      value: summary.offlineServiceErrors,
+      accent: true,
+    },
   ];
 
   const handleLogout = () => {
@@ -214,8 +259,8 @@ function DashboardPage() {
             <p className="eyebrow">Admin controls</p>
             <h1>Admin Dashboard</h1>
             <p>
-              Monitor assistant activity, sandbox actions, connectors, and
-              service readiness.
+              Monitor assistant activity, internal service actions, connectors,
+              and service readiness.
             </p>
           </div>
           <div className="dashboard-header-actions">
@@ -266,8 +311,8 @@ function DashboardPage() {
               <dd>{connectors.length}</dd>
             </div>
             <div>
-              <dt>External services</dt>
-              <dd>{externalStatuses.length}</dd>
+              <dt>Internal services</dt>
+              <dd>{serviceStatuses.length}</dd>
             </div>
             <div>
               <dt>Current mode</dt>
@@ -282,48 +327,29 @@ function DashboardPage() {
           <Card className="dashboard-panel">
             <div className="dashboard-panel-header">
               <div>
-                <p className="eyebrow">External services</p>
+                <p className="eyebrow">Internal services</p>
                 <h2>Service Status</h2>
               </div>
-              <Badge tone="neutral">{externalStatuses.length} services</Badge>
+              <Badge tone="neutral">{serviceStatuses.length} services</Badge>
             </div>
 
             <div className="service-status-list">
-              {externalStatuses.map((service) => {
-                const hasHealth =
-                  service.connected !== undefined ||
-                  service.health !== undefined ||
-                  service.status !== undefined;
-                const isConnected =
-                  service.connected === true ||
-                  service.health === 'connected' ||
-                  service.status === 'connected';
-
-                return (
-                  <div key={service.service} className="service-status-row">
-                    <div>
-                      <strong>{formatLabel(service.service)}</strong>
-                      <span>ATB {formatLabel(service.service)} integration</span>
-                    </div>
-                    <div className="service-pill-row">
-                      <Badge tone={serviceTone(service)}>
-                        {service.enabled ? 'Enabled' : 'Disabled'}
-                      </Badge>
-                      <Badge tone={service.configured ? 'success' : 'neutral'}>
-                        {service.configured ? 'Configured' : 'Not configured'}
-                      </Badge>
-                      {hasHealth ? (
-                        <Badge tone={isConnected ? 'success' : 'danger'}>
-                          {isConnected ? 'Connected' : 'Offline'}
-                        </Badge>
-                      ) : null}
-                    </div>
+              {serviceStatuses.map((service) => (
+                <div key={service.service} className="service-status-row">
+                  <div>
+                    <strong>{formatServiceName(service.service)} Service</strong>
+                    <span>{formatServiceDescription(service.service)}</span>
                   </div>
-                );
-              })}
-              {!externalStatuses.length ? (
+                  <div className="service-pill-row">
+                    <Badge tone={serviceTone(service)}>
+                      {serviceStatusLabel(service)}
+                    </Badge>
+                  </div>
+                </div>
+              ))}
+              {!serviceStatuses.length ? (
                 <p className="dashboard-empty-note">
-                  No external service status available.
+                  No internal service status available.
                 </p>
               ) : null}
             </div>
@@ -396,6 +422,7 @@ function DashboardPage() {
                     <th>Status</th>
                     <th>Risk</th>
                     <th>Mode</th>
+                    <th>Service</th>
                     <th>Connector</th>
                     <th>Reference</th>
                   </tr>
@@ -421,6 +448,7 @@ function DashboardPage() {
                         )}
                       </td>
                       <td>{getLogMode(log)}</td>
+                      <td>{log.serviceName ? formatLabel(log.serviceName) : '-'}</td>
                       <td>
                         {formatLabel(log.connectorName)}
                         {log.operationName ? ` / ${formatLabel(log.operationName)}` : ''}

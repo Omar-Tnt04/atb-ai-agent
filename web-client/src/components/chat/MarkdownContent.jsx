@@ -1,3 +1,5 @@
+import { Fragment } from 'react';
+
 const isTableDivider = (line) =>
   /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
 
@@ -55,7 +57,12 @@ function InlineMarkdown({ text }) {
 function renderParagraph(lines, key) {
   return (
     <p key={key}>
-      <InlineMarkdown text={lines.join(' ')} />
+      {lines.map((line, index) => (
+        <Fragment key={`${line}-${index}`}>
+          <InlineMarkdown text={line} />
+          {index < lines.length - 1 ? <br /> : null}
+        </Fragment>
+      ))}
     </p>
   );
 }

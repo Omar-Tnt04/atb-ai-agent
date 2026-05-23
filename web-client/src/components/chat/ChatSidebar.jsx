@@ -130,21 +130,23 @@ function ChatSidebar({
 
   return (
     <aside className="chat-sidebar">
-      <div className="sidebar-brand">
-        <Logo />
-        <div>
-          <p>ATB Assistant</p>
-          <span>Banking workspace</span>
+      <div className="sidebar-header">
+        <div className="sidebar-brand">
+          <Logo />
+          <div>
+            <p>ATB Assistant</p>
+            <span>Banking workspace</span>
+          </div>
         </div>
-      </div>
 
-      <button
-        type="button"
-        className="button button-primary new-thread-button"
-        onClick={onNewThread}
-      >
-        New conversation
-      </button>
+        <button
+          type="button"
+          className="button button-primary new-thread-button"
+          onClick={onNewThread}
+        >
+          New conversation
+        </button>
+      </div>
 
       <div className="thread-list" aria-label="Conversation history">
         {threads.map((thread) => (

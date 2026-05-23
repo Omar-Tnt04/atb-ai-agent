@@ -2,8 +2,8 @@ const {
   getAvailableConnectors,
 } = require('../connectors/connectorRegistry');
 const {
-  getAllExternalServiceStatuses,
-} = require('../connectors/external/externalService.config');
+  getAllInternalServiceStatuses,
+} = require('../connectors/internal/internalService.config');
 
 const listConnectors = (req, res) => {
   return res.json({
@@ -12,14 +12,16 @@ const listConnectors = (req, res) => {
   });
 };
 
-const getExternalStatus = (req, res) => {
+const getInternalServiceStatus = async (req, res) => {
+  const statuses = await getAllInternalServiceStatuses();
+
   return res.json({
     success: true,
-    data: getAllExternalServiceStatuses(),
+    data: statuses,
   });
 };
 
 module.exports = {
-  getExternalStatus,
+  getInternalServiceStatus,
   listConnectors,
 };

@@ -8,13 +8,8 @@ function ChatStatusSticker({ text }) {
   return (
     <div className="chat-row chat-row-assistant">
       <AssistantAvatar />
-      <div className="status-sticker">
-        <span>{text}</span>
-        <span className="typing-dots" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
+      <div className="status-message">
+        <span className="status-shimmer">{text}</span>
       </div>
     </div>
   );

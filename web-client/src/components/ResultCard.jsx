@@ -73,12 +73,7 @@ function ResultCard({ data }) {
     const document = data.document;
 
     return (
-      <CompactResult
-        data={data}
-        downloadUrl={document.downloadUrl}
-        note={`${formatValue(document.title)} is ready.`}
-        rows={[]}
-      />
+      <CompactResult data={data} downloadUrl={document.downloadUrl} rows={[]} />
     );
   }
 

@@ -443,8 +443,7 @@ const createExecutionLog = ({
   confirmationStatus,
   smsVerificationStatus,
   connectorSource,
-  fallbackUsed,
-  fallbackReason,
+  serviceName,
 }) => {
   return createAuditLog({
     userId: user.id,
@@ -462,8 +461,7 @@ const createExecutionLog = ({
     connectorName: action?.connector,
     operationName: action?.operation,
     connectorSource,
-    fallbackUsed,
-    fallbackReason,
+    serviceName,
   });
 };
 
@@ -590,19 +588,24 @@ const executeValidatedAction = async ({
   });
 
   if (!executionResult.success) {
+    const isServiceUnavailable =
+      executionResult.status === 'service_unavailable' ||
+      executionResult.status === 'service_error';
+
     createExecutionLog({
       user,
       action,
       actionName,
       payload,
-      status: failureAuditStatus || executionResult.status,
+      status: isServiceUnavailable
+        ? 'service_unavailable'
+        : failureAuditStatus || executionResult.status,
       failureReason: executionResult.message,
       confirmationId,
       confirmationStatus,
       smsVerificationStatus,
-      connectorSource: executionResult.source,
-      fallbackUsed: executionResult.fallbackUsed,
-      fallbackReason: executionResult.fallbackReason,
+      connectorSource: executionResult.source || getExecutionMode(action),
+      serviceName: executionResult.serviceName,
     });
 
     return {
@@ -615,12 +618,7 @@ const executeValidatedAction = async ({
     };
   }
 
-  const executionMode =
-    executionResult.source === 'external'
-      ? 'external'
-      : executionResult.source === 'sandbox'
-        ? 'sandbox'
-        : getExecutionMode(action);
+  const executionMode = executionResult.source || getExecutionMode(action);
 
   createExecutionLog({
     user,
@@ -632,9 +630,8 @@ const executeValidatedAction = async ({
     confirmationId,
     confirmationStatus,
     smsVerificationStatus,
-    connectorSource: executionResult.source || executionMode,
-    fallbackUsed: executionResult.fallbackUsed,
-    fallbackReason: executionResult.fallbackReason,
+    connectorSource: executionMode,
+    serviceName: executionResult.serviceName,
   });
 
   return {
@@ -644,13 +641,9 @@ const executeValidatedAction = async ({
       status: 'completed',
       message: 'Action executed successfully',
       executionMode,
-      fallbackUsed: Boolean(executionResult.fallbackUsed),
-      fallbackReason: executionResult.fallbackReason || null,
       data: {
         ...executionResult.data,
         executionMode,
-        fallbackUsed: Boolean(executionResult.fallbackUsed),
-        fallbackReason: executionResult.fallbackReason || null,
       },
     },
   };

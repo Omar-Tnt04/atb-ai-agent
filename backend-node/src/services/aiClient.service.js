@@ -7,7 +7,9 @@ const analyzeMessage = async ({
   availableActions,
   conversationHistory,
   fileContext,
+  resolvedResourceContext,
   profileContext,
+  agentContext,
 }) => {
   const response = await axios.post(`${env.aiServiceUrl}/agent/analyze`, {
     message,
@@ -15,7 +17,9 @@ const analyzeMessage = async ({
     availableActions,
     conversationHistory,
     fileContext,
+    resolvedResourceContext,
     profileContext,
+    agentContext,
   });
 
   return response.data;

@@ -33,9 +33,7 @@ const createAuditLog = (logData) => {
     connectorName: logData.connectorName || null,
     operationName: logData.operationName || null,
     connectorSource: logData.connectorSource || null,
-    fallbackUsed:
-      logData.fallbackUsed === undefined ? null : Boolean(logData.fallbackUsed),
-    fallbackReason: logData.fallbackReason || null,
+    serviceName: logData.serviceName || null,
     confirmationId: logData.confirmationId || null,
     confirmation_status: logData.confirmationStatus || null,
     sms_verification_status: logData.smsVerificationStatus || null,

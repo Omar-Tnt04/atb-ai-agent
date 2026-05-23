@@ -15,6 +15,7 @@ const documentRoutes = require('./routes/document.routes');
 const generatedFileRoutes = require('./routes/generatedFile.routes');
 const healthRoutes = require('./routes/health.routes');
 const integrationRoutes = require('./routes/integration.routes');
+const resourceRoutes = require('./routes/resource.routes');
 const smsVerificationRoutes = require('./routes/smsVerification.routes');
 const transferRoutes = require('./routes/transfer.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/error.middleware');
@@ -27,6 +28,7 @@ app.use(morgan('dev'));
 
 app.use('/generated', generatedFileRoutes);
 app.use('/health', healthRoutes);
+app.use('/resources', resourceRoutes);
 app.use('/auth', authRoutes);
 app.use('/chat', chatRoutes);
 app.use('/actions', actionRoutes);

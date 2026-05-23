@@ -1,47 +1,55 @@
 const { getActionByName } = require('../actions/actionRegistry');
-const {
-  getSafeServiceStatus,
-} = require('../connectors/external/externalService.config');
 const mockAccounts = require('../data/mockAccounts');
 const { maskAccountNumber } = require('../utils/mask');
 const { getMissingFields } = require('../utils/validation');
 
-// Maps an action category to its external service name (externalService.config).
-const CATEGORY_EXTERNAL_SERVICE = {
-  payments: 'payment',
-  documents: 'document',
-  complaints: 'complaint',
-  appointments: 'appointment',
-};
-
-// Determines whether an action will run against a real external connector or
-// the sandbox/demo connector. Used to label the workflow honestly in the UI.
+// Every connected action is executed by the backend orchestrator through a
+// connector that calls a separate internal service. In production those internal
+// demo services are replaced by the real ATB internal APIs.
 const getExecutionMode = (action) => {
   if (!action || action.status !== 'connected') {
     return 'none';
   }
 
-  const connector = action.connector || '';
-
-  if (connector.startsWith('hybrid')) {
-    const serviceName = CATEGORY_EXTERNAL_SERVICE[action.category];
-
-    if (!serviceName) {
-      return 'sandbox';
-    }
-
-    const status = getSafeServiceStatus(serviceName);
-    return status.enabled && status.configured ? 'external' : 'sandbox';
-  }
-
-  // sandbox*, mock*, or internal switch-handled actions all run in sandbox mode.
-  return 'sandbox';
+  return 'internal_demo_service';
 };
 
 const formatFieldLabel = (field) => {
+  const labels = {
+    billReference: 'Bill reference',
+    sourceAccountId: 'Source account',
+  };
+
+  if (labels[field]) {
+    return labels[field];
+  }
+
   return field
     .replace(/([A-Z])/g, ' $1')
     .replace(/^./, (character) => character.toUpperCase());
+};
+
+const normalizePayloadForAction = (actionName, payload = {}) => {
+  if (actionName === 'pay_bill' && !payload.sourceAccountId && payload.accountId) {
+    return {
+      ...payload,
+      sourceAccountId: payload.accountId,
+    };
+  }
+
+  return payload;
+};
+
+const getPreparationMissingFields = (action, payload) => {
+  const missingFields = getMissingFields(action.requiredFields, payload);
+
+  if (action.name === 'create_complaint') {
+    if (missingFields.includes('category')) return ['category'];
+    if (missingFields.includes('description')) return ['description'];
+    return [];
+  }
+
+  return missingFields;
 };
 
 const getMaskedAccountLabel = (accountId, user) => {
@@ -58,8 +66,39 @@ const getMaskedAccountLabel = (accountId, user) => {
   return maskAccountNumber(account.accountNumber);
 };
 
+const formatAmount = (amountValue, currency = 'TND') => {
+  const amount = Number(amountValue);
+  const formattedAmount = Number.isFinite(amount)
+    ? amount.toFixed(3)
+    : amountValue;
+
+  return `${formattedAmount} ${currency || 'TND'}`;
+};
+
 const buildSummary = (action, payload, user) => {
-  const summary = [`Action: ${action.displayName}`];
+  if (action.name === 'pay_bill') {
+    const summary = [];
+
+    if (payload.provider) {
+      summary.push(`Provider: ${payload.provider}`);
+    }
+
+    if (payload.billReference) {
+      summary.push(`Bill reference: ${payload.billReference}`);
+    }
+
+    if (payload.amount !== undefined && payload.amount !== null) {
+      summary.push(`Amount: ${formatAmount(payload.amount, payload.currency)}`);
+    }
+
+    if (payload.sourceAccountId) {
+      summary.push(`Account: ${getMaskedAccountLabel(payload.sourceAccountId, user)}`);
+    }
+
+    return summary;
+  }
+
+  const summary = [];
 
   action.requiredFields.forEach((field) => {
     const value = payload[field];
@@ -109,7 +148,8 @@ const prepareAction = ({ actionName, payload = {}, user }) => {
     };
   }
 
-  const missingFields = getMissingFields(action.requiredFields, payload);
+  const normalizedPayload = normalizePayloadForAction(action.name, payload);
+  const missingFields = getPreparationMissingFields(action, normalizedPayload);
 
   if (missingFields.length > 0) {
     return {
@@ -150,9 +190,9 @@ const prepareAction = ({ actionName, payload = {}, user }) => {
         apiEndpoint: action.apiEndpoint,
         method: action.method,
         executionMode,
-        externalConnectorConfigured: executionMode === 'external',
-        payload,
-        summary: buildSummary(action, payload, user),
+        internalServiceRouted: executionMode === 'internal_demo_service',
+        payload: normalizedPayload,
+        summary: buildSummary(action, normalizedPayload, user),
       },
     },
   };

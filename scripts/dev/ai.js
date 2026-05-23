@@ -4,8 +4,8 @@ const path = require("node:path");
 const rootDir = path.resolve(__dirname, "..", "..");
 const pythonCommand =
   process.platform === "win32"
-    ? ".\\venv\\Scripts\\python.exe"
-    : "./venv/bin/python";
+    ? path.join(rootDir, "ai-service-python", "venv", "Scripts", "python.exe")
+    : path.join(rootDir, "ai-service-python", "venv", "bin", "python");
 
 const child = spawn(
   pythonCommand,
@@ -13,7 +13,6 @@ const child = spawn(
     "-m",
     "uvicorn",
     "app.main:app",
-    "--reload",
     "--port",
     "8000",
     "--log-level",

@@ -27,6 +27,23 @@ const blockedExtensions = new Set([
   '.scr',
 ]);
 
+const DOCX_UNSUPPORTED_MESSAGE =
+  'DOCX files are not supported. Please upload a PDF, image, TXT, CSV, or JSON file.';
+
+const UNSUPPORTED_FILE_MESSAGE =
+  'Unsupported file type. Please upload a PDF, image, TXT, CSV, or JSON file.';
+
+const allowedExtensions = new Set([
+  '.pdf',
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.txt',
+  '.csv',
+  '.json',
+]);
+
 const storage = multer.diskStorage({
   destination: (req, file, callback) => {
     callback(null, uploadDir);
@@ -46,8 +63,16 @@ const storage = multer.diskStorage({
 const fileFilter = (req, file, callback) => {
   const extension = path.extname(file.originalname).toLowerCase();
 
+  if (extension === '.docx') {
+    return callback(new Error(DOCX_UNSUPPORTED_MESSAGE));
+  }
+
   if (blockedExtensions.has(extension)) {
     return callback(new Error('Executable or script files are not allowed'));
+  }
+
+  if (!allowedExtensions.has(extension)) {
+    return callback(new Error(UNSUPPORTED_FILE_MESSAGE));
   }
 
   return callback(null, true);

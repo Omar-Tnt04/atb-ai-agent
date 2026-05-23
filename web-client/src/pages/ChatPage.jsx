@@ -7,7 +7,6 @@ import {
   verifyAndExecuteAction,
 } from '../api/actionApi';
 import { downloadGeneratedFile, sendChatMessage, sendChatMessageWithFiles } from '../api/chatApi';
-import Badge from '../components/Badge.jsx';
 import Button from '../components/Button.jsx';
 import AssistantAvatar from '../components/chat/AssistantAvatar.jsx';
 import ChatMessage from '../components/chat/ChatMessage.jsx';
@@ -59,12 +58,6 @@ const statusTone = (status) => {
   return 'neutral';
 };
 
-const riskTone = (riskLevel) => {
-  if (riskLevel === 'high') return 'danger';
-  if (riskLevel === 'medium') return 'warning';
-  return 'success';
-};
-
 const formatStatus = (status) =>
   statusLabels[status] || status?.replaceAll('_', ' ') || 'Status';
 
@@ -96,16 +89,30 @@ const saveUserProfile = (user, profile) => {
 
 // Contextual status messages for agent activity sticker
 const ACTIVITY_LABELS = {
-  reading_file: 'Reading uploaded file...',
-  extracting: 'Extracting information...',
-  generating_file: 'Generating your file...',
-  preparing_action: 'Preparing secure action...',
-  executing_action: 'Executing sandbox action...',
-  verifying_sms: 'Verifying SMS code...',
-  understanding: 'Understanding your request...',
+  reading_file: 'Reading uploaded file',
+  extracting: 'Extracting information',
+  generating_file: 'Generating document',
+  preparing_action: 'Preparing request',
+  executing_action: 'Calling internal service',
+  verifying_sms: 'Verifying SMS',
+  understanding: 'Thinking',
 };
 
 const EMPTY_AGENT_CONTEXT = { extractedFields: {}, suggestedAction: null };
+const SUPPORTED_UPLOAD_EXTENSIONS = new Set([
+  'pdf',
+  'png',
+  'jpg',
+  'jpeg',
+  'webp',
+  'txt',
+  'csv',
+  'json',
+]);
+const DOCX_UNSUPPORTED_MESSAGE =
+  'DOCX files are not supported. Please upload a PDF, image, TXT, CSV, or JSON file.';
+const UNSUPPORTED_FILE_MESSAGE =
+  'Unsupported file type. Please upload a PDF, image, TXT, CSV, or JSON file.';
 
 const QUICK_ACTIONS = [
   { label: 'Upload a bill', type: 'upload' },
@@ -114,89 +121,6 @@ const QUICK_ACTIONS = [
   { label: 'Create complaint', prompt: 'Create a complaint' },
   { label: 'Book appointment', prompt: 'Book an appointment' },
 ];
-
-const fieldLabels = {
-  accountId: 'Account',
-  amount: 'Amount',
-  beneficiaryId: 'Beneficiary',
-  billReference: 'Bill reference',
-  branch: 'Branch name',
-  category: 'Complaint category',
-  date: 'Preferred date',
-  description: 'Description',
-  documentType: 'Document type',
-  period: 'Period',
-  sourceAccountId: 'Source account',
-  time: 'Preferred time slot',
-};
-
-const formatFieldLabel = (field) =>
-  fieldLabels[field] || field?.replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase());
-
-const getTomorrowDate = () => {
-  const date = new Date();
-  date.setDate(date.getDate() + 1);
-  return date.toISOString().slice(0, 10);
-};
-
-const quickRepliesByAction = {
-  book_appointment: {
-    branch: [
-      { label: 'Tunis Centre branch', prompt: 'branch Tunis Centre' },
-      { label: 'La Marsa branch', prompt: 'branch La Marsa' },
-    ],
-    date: [
-      { label: 'Tomorrow', prompt: `date ${getTomorrowDate()}` },
-      { label: 'Show available slots', prompt: 'Show available appointment slots' },
-    ],
-    time: [
-      { label: '10:00', prompt: 'time 10:00' },
-      { label: '14:00', prompt: 'time 14:00' },
-    ],
-  },
-  check_balance: {
-    accountId: [
-      { label: 'Current account', prompt: 'account acc_001' },
-      { label: 'Savings account', prompt: 'account acc_002' },
-    ],
-  },
-  generate_document: {
-    accountId: [
-      { label: 'Current account', prompt: 'account acc_001' },
-      { label: 'Savings account', prompt: 'account acc_002' },
-    ],
-    documentType: [
-      { label: 'Statement', prompt: 'statement' },
-      { label: 'RIB', prompt: 'rib' },
-    ],
-    period: [
-      { label: 'April 2026', prompt: 'April 2026' },
-      { label: 'Generate document', prompt: 'Generate my account statement' },
-    ],
-  },
-  create_complaint: {
-    category: [
-      { label: 'Failed transfer', prompt: 'transfer complaint' },
-      { label: 'Card issue', prompt: 'card complaint' },
-      { label: 'Account access issue', prompt: 'account complaint' },
-    ],
-    description: [
-      { label: 'Failed transfer', prompt: 'I have a failed transfer issue' },
-      { label: 'Card issue', prompt: 'I have a card issue' },
-      { label: 'Continue', prompt: 'Continue' },
-    ],
-  },
-  pay_bill: {
-    sourceAccountId: [
-      { label: 'Use current account', prompt: 'source account acc_001' },
-      { label: 'Use savings account', prompt: 'source account acc_002' },
-    ],
-    billReference: [
-      { label: 'Enter bill reference', prompt: 'bill reference ' },
-      { label: 'Upload a bill', action: 'upload' },
-    ],
-  },
-};
 
 // Infers which banking action a remembered field set points to.
 const inferActionFromFields = (fields = {}) => {
@@ -208,15 +132,25 @@ const inferActionFromFields = (fields = {}) => {
   return null;
 };
 
+const stripPrivateResourceFields = (fields = {}) =>
+  Object.fromEntries(
+    Object.entries(fields || {}).filter(
+      ([key]) => !String(key).toLowerCase().startsWith('_resource'),
+    ),
+  );
+
 // Accumulates the context the assistant extracted so follow-up commands
 // ("pay it", "continue", ...) can reuse it on the next turn.
 const deriveAgentContext = (previousContext, response) => {
   const ai = response?.data?.ai || {};
   const finalPayload = response?.data?.finalPayload || {};
+  const hasNewFileContext = Boolean(response?.data?.fileContext?.files?.length);
   const mergedFields = {
-    ...(previousContext?.extractedFields || {}),
-    ...(ai.extractedFields || {}),
-    ...finalPayload,
+    ...(hasNewFileContext
+      ? {}
+      : stripPrivateResourceFields(previousContext?.extractedFields || {})),
+    ...stripPrivateResourceFields(ai.extractedFields || {}),
+    ...stripPrivateResourceFields(finalPayload),
   };
   const suggestedAction =
     ai.actionName ||
@@ -228,134 +162,97 @@ const deriveAgentContext = (previousContext, response) => {
   return { extractedFields: mergedFields, suggestedAction };
 };
 
-// Direct completion wording for chat results. Sandbox details stay in collapsed technical details.
+const formatMoney = (amount, currency = 'TND') => {
+  const numericAmount = Number(amount);
+  if (!Number.isFinite(numericAmount)) return amount ? `${amount} ${currency}` : '';
+  return `${numericAmount.toFixed(3)} ${currency || 'TND'}`;
+};
+
+// Direct completion wording for chat results. Technical details stay out of chat.
 const buildCompletionText = (_executionMode, data = {}) => {
-  if (data.paymentReference) return 'Payment completed.';
-  if (data.transferReference) return 'Transfer completed.';
-  if (data.document) return 'Document ready.';
-  if (data.complaint) return 'Complaint submitted.';
-  if (data.appointment) return 'Appointment booked.';
+  if (data.paymentReference) {
+    return [
+      'Payment completed.',
+      '',
+      `**Reference:** ${data.paymentReference}`,
+      `**Amount:** ${formatMoney(data.amount, data.currency)}`,
+      `**Provider:** ${data.provider || 'Provider'}`,
+    ].join('\n');
+  }
+
+  if (data.transferReference) {
+    return [
+      'Transfer completed.',
+      '',
+      `**Reference:** ${data.transferReference}`,
+      `**Amount:** ${formatMoney(data.amount, data.currency)}`,
+      `**Beneficiary:** ${data.beneficiaryName || data.beneficiaryId || 'Beneficiary'}`,
+    ].join('\n');
+  }
+
+  if (data.document) {
+    return [
+      'Document ready.',
+      '',
+      data.document.title || 'Your requested banking document is ready.',
+    ].join('\n');
+  }
+
+  if (data.complaint) {
+    return [
+      'Complaint submitted.',
+      '',
+      `**Reference:** ${data.complaint.reference}`,
+      `**Status:** ${data.complaint.status || 'Open'}`,
+    ].join('\n');
+  }
+
+  if (data.appointment) {
+    return [
+      'Appointment booked.',
+      '',
+      `**Reference:** ${data.appointment.appointmentId}`,
+      `**Branch:** ${data.appointment.branch}`,
+      `**Date:** ${data.appointment.date}`,
+      `**Time:** ${data.appointment.time}`,
+    ].join('\n');
+  }
+
+  if (data.account?.balance !== undefined) {
+    return [
+      'Balance retrieved.',
+      '',
+      `**Account:** ${data.account.accountNumber || data.account.id}`,
+      `**Balance:** ${formatMoney(data.account.balance, data.account.currency)}`,
+      `**Status:** ${data.account.status || 'Active'}`,
+    ].join('\n');
+  }
+
   return 'Action completed.';
 };
-const executionModeLabel = (executionMode) =>
-  executionMode === 'external'
-    ? 'Live ATB connector'
-    : 'Sandbox demo';
 
-const buildMissingFieldsMessage = (response) => {
-  const missingFields = response.data?.missingFields || response.data?.ai?.missingFields || [];
-  const actionName = response.data?.ai?.actionName || response.data?.actionName;
+// The assistant text flows as Markdown, exactly as the backend phrases it.
+const buildAssistantText = (response) =>
+  response.assistantMessage || 'I reviewed your request.';
 
-  if (!missingFields.length) {
-    return response.assistantMessage || 'I need a few more details before I can continue.';
-  }
-
-  const titleByAction = {
-    book_appointment: 'To book your appointment, I need a few details:',
-    generate_document: 'To generate your document, I need a few details:',
-    create_complaint: 'To create your complaint, I need a few details:',
-    pay_bill: 'To prepare this bill payment, I need a few details:',
-    check_balance: 'To check your balance, I need one detail:',
-    make_transfer: 'To prepare this transfer, I need a few details:',
-  };
-
-  const fields = missingFields
-    .map((field) => `- ${formatFieldLabel(field)}`)
-    .join('\n');
-
-  return `${titleByAction[actionName] || 'I need a few details before I can continue:'}\n\n**Required information**\n${fields}\n\nChoose one of the options below or type your answer.`;
-};
-
-const buildAssistantText = (response) => {
-  if (response.status === 'missing_fields') {
-    return buildMissingFieldsMessage(response);
-  }
-
-  if (response.status === 'action_prepared') {
-    const displayName = response.data?.preparation?.displayName || 'banking action';
-    return `**Review ${displayName.toLowerCase()}**\n\nI prepared this request using the details available so far. Review the summary below, then continue or cancel.`;
-  }
-
-  return (
-    response.assistantMessage ||
-    'I reviewed your request. Please review the details below.'
-  );
-};
-
-const uniqueQuickReplies = (replies) => {
-  const seen = new Set();
-  return replies.filter((reply) => {
-    const key = `${reply.label}-${reply.prompt || reply.action || ''}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-};
-
-const buildMissingFieldQuickReplies = (response) => {
-  const actionName = response.data?.ai?.actionName || response.data?.actionName;
-  const missingFields = response.data?.missingFields || response.data?.ai?.missingFields || [];
-  const actionReplies = quickRepliesByAction[actionName] || {};
-
-  return uniqueQuickReplies(
-    missingFields.flatMap((field) =>
-      (actionReplies[field] || []).map((reply) => ({
-        ...reply,
-        field,
-        fieldLabel: formatFieldLabel(field),
-        selectable:
-          !reply.action &&
-          !String(reply.prompt || reply.label).toLowerCase().startsWith('show '),
-      })),
-    ),
-  ).slice(0, 6);
-};
-
-const buildPreparedActionQuickReplies = (response) => {
-  const actionName = response.data?.preparation?.actionName || response.data?.ai?.actionName;
-
-  if (actionName === 'pay_bill') {
-    return [
-      { label: 'Pay it', action: 'continue' },
-      { label: 'Cancel', action: 'cancel' },
-      { label: 'Show details', prompt: 'Show payment details' },
-    ];
-  }
-
-  if (actionName === 'generate_document') {
-    return [
-      { label: 'Generate document', action: 'continue' },
-      { label: 'Cancel', action: 'cancel' },
-    ];
-  }
-
-  return [
-    { label: 'Continue', action: 'continue' },
-    { label: 'Cancel', action: 'cancel' },
-  ];
-};
-
+// The only inline controls left on assistant messages are the small
+// Confirm / Cancel buttons for a prepared action. Missing fields are asked for
+// in natural language, never as option chips.
 const buildAssistantQuickReplies = (response) => {
-  if (response.status === 'missing_fields') {
-    return buildMissingFieldQuickReplies(response);
-  }
+  const resourceActions = response?.data?.ai?.toolInput?.quickActions || [];
 
   if (response.status === 'action_prepared') {
-    return buildPreparedActionQuickReplies(response);
-  }
-
-  if (
-    response.status === 'file_analyzed' &&
-    response.data?.ai?.extractedFields?.billReference
-  ) {
     return [
-      { label: 'Pay it', prompt: 'Pay it' },
-      { label: 'Show details', prompt: 'Show bill details' },
+      { label: 'Confirm', action: 'continue' },
+      { label: 'Cancel', action: 'cancel' },
+      ...resourceActions.filter((action) => action.action === 'open_url').slice(0, 1),
     ];
   }
 
-  return [];
+  return resourceActions;
 };
+
+const shouldAppendAssistantMessage = () => true;
 
 function InlineAssistantPanel({ children, className = '' }) {
   return (
@@ -431,6 +328,11 @@ function ChatPage() {
   const [pendingGeneratedFile, setPendingGeneratedFile] = useState(
     initialThread?.pendingGeneratedFile || null,
   );
+  // Remembers an action whose fields are still being collected so the next
+  // short reply ("acc_002", "10:00") continues it instead of starting over.
+  const [pendingFieldAction, setPendingFieldAction] = useState(
+    initialThread?.pendingFieldAction || null,
+  );
   const [agentContext, setAgentContext] = useState(
     initialThread?.agentContext || EMPTY_AGENT_CONTEXT,
   );
@@ -452,6 +354,7 @@ function ChatPage() {
     setSmsCode(thread.smsCode || '');
     setSmsError(thread.smsError || '');
     setPendingGeneratedFile(thread.pendingGeneratedFile || null);
+    setPendingFieldAction(thread.pendingFieldAction || null);
     setAgentContext(thread.agentContext || EMPTY_AGENT_CONTEXT);
     setAssistantActivity('');
     setActionLoadingText('');
@@ -513,17 +416,26 @@ function ChatPage() {
     if (user) saveChatThreads(user, threads);
   }, [threads, user]);
 
+  const scrollToBottom = useCallback((behavior = 'smooth') => {
+    const node = transcriptRef.current;
+    if (!node) return;
+    node.scrollTo({ top: node.scrollHeight, behavior });
+  }, []);
+
   useEffect(() => {
-    if (!transcriptRef.current) return;
-    transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight;
+    const frameId = window.requestAnimationFrame(() => {
+      scrollToBottom('smooth');
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
   }, [
     actionLoadingText,
     assistantActivity,
     messages,
-    pendingAction,
     pendingConfirmation,
     pendingSms,
     pendingGeneratedFile,
+    scrollToBottom,
   ]);
 
   const conversationHistory = useMemo(
@@ -569,7 +481,31 @@ function ChatPage() {
 
   const handleFileChange = (event) => {
     const incomingFiles = Array.from(event.target.files || []);
-    setSelectedFiles((currentFiles) => [...currentFiles, ...incomingFiles].slice(0, 5));
+    const acceptedFiles = [];
+
+    incomingFiles.forEach((file) => {
+      const extension = file.name.split('.').pop()?.toLowerCase() || '';
+
+      if (extension === 'docx') {
+        appendAssistantMessage({
+          text: DOCX_UNSUPPORTED_MESSAGE,
+          status: 'error',
+        });
+        return;
+      }
+
+      if (!SUPPORTED_UPLOAD_EXTENSIONS.has(extension)) {
+        appendAssistantMessage({
+          text: UNSUPPORTED_FILE_MESSAGE,
+          status: 'error',
+        });
+        return;
+      }
+
+      acceptedFiles.push(file);
+    });
+
+    setSelectedFiles((currentFiles) => [...currentFiles, ...acceptedFiles].slice(0, 5));
     event.target.value = '';
   };
 
@@ -656,13 +592,13 @@ function ChatPage() {
   };
 
   const buildAssistantDetails = (response) => {
-    if (response.status === 'action_prepared') {
-      return { summary: response.data?.preparation?.summary || [] };
-    }
+    void response;
     return null;
   };
 
-  const buildResultDetails = (data) => (data ? { result: data } : null);
+  const buildResultDetails = (data) => (
+    data?.document?.downloadUrl ? { result: { document: data.document } } : null
+  );
 
   const clearPendingInteractionState = () => {
     setPendingAction(null);
@@ -680,6 +616,7 @@ function ChatPage() {
       setPendingConfirmation(null);
       setPendingSms(null);
       setPendingGeneratedFile(null);
+      setPendingFieldAction(null);
       setSmsCode('');
       setSmsError('');
       updateThreadMetadata({
@@ -687,6 +624,7 @@ function ChatPage() {
         pendingConfirmation: null,
         pendingSms: null,
         pendingGeneratedFile: null,
+        pendingFieldAction: null,
         smsCode: '',
         smsError: '',
       });
@@ -694,15 +632,22 @@ function ChatPage() {
     }
 
     if (response.status === 'missing_fields') {
+      const nextPendingFieldAction = {
+        actionName: response.data?.ai?.actionName || response.data?.actionName || null,
+        missingFields: response.data?.missingFields || [],
+        collectedFields: response.data?.finalPayload || {},
+      };
       setPendingAction(null);
       setPendingConfirmation(null);
       setPendingSms(null);
       setPendingGeneratedFile(null);
+      setPendingFieldAction(nextPendingFieldAction);
       updateThreadMetadata({
         pendingAction: null,
         pendingConfirmation: null,
         pendingSms: null,
         pendingGeneratedFile: null,
+        pendingFieldAction: nextPendingFieldAction,
       });
       return;
     }
@@ -713,21 +658,25 @@ function ChatPage() {
       setPendingConfirmation(null);
       setPendingSms(null);
       setPendingGeneratedFile(generatedFile);
+      setPendingFieldAction(null);
       updateThreadMetadata({
         pendingAction: null,
         pendingConfirmation: null,
         pendingSms: null,
         pendingGeneratedFile: generatedFile,
+        pendingFieldAction: null,
       });
       return;
     }
 
     // Default: clear all pending interaction state
+    setPendingFieldAction(null);
     updateThreadMetadata({
       pendingAction: null,
       pendingConfirmation: null,
       pendingSms: null,
       pendingGeneratedFile: null,
+      pendingFieldAction: null,
     });
     clearPendingInteractionState();
   };
@@ -735,7 +684,9 @@ function ChatPage() {
   const handleExecutionResponse = (response) => {
     if (response.status === 'completed') {
       const executionMode =
-        response.executionMode || response.data?.executionMode || 'sandbox';
+        response.executionMode ||
+        response.data?.executionMode ||
+        'internal_demo_service';
       appendAssistantMessage({
         text: buildCompletionText(executionMode, response.data),
         status: response.status,
@@ -744,6 +695,7 @@ function ChatPage() {
       setPendingAction(null);
       setPendingConfirmation(null);
       setPendingSms(null);
+      setPendingFieldAction(null);
       setSmsCode('');
       setSmsError('');
       setAgentContext(EMPTY_AGENT_CONTEXT);
@@ -751,6 +703,7 @@ function ChatPage() {
         pendingAction: null,
         pendingConfirmation: null,
         pendingSms: null,
+        pendingFieldAction: null,
         smsCode: '',
         smsError: '',
         agentContext: EMPTY_AGENT_CONTEXT,
@@ -760,8 +713,12 @@ function ChatPage() {
 
     if (response.status === 'confirmation_required') {
       appendAssistantMessage({
-        text: 'Please review and confirm this banking action.',
+        text: 'Please confirm to continue.',
         status: response.status,
+        quickReplies: [
+          { label: 'Confirm', action: 'confirm_pending' },
+          { label: 'Cancel', action: 'cancel' },
+        ],
       });
       setPendingAction(null);
       setPendingConfirmation(response.data);
@@ -776,7 +733,9 @@ function ChatPage() {
 
     if (response.status === 'sms_required') {
       appendAssistantMessage({
-        text: 'SMS verification is required before this secure action can continue.',
+        text: response.data?.maskedPhoneNumber
+          ? `Enter the SMS code sent to ${response.data.maskedPhoneNumber}.`
+          : 'Enter the SMS code to continue.',
         status: response.status,
       });
       setPendingAction(null);
@@ -826,6 +785,28 @@ function ChatPage() {
     return ACTIVITY_LABELS.understanding;
   };
 
+  const isCancelCommand = (text) =>
+    ['cancel', 'cancel it', 'stop', 'never mind'].includes(
+      String(text || '').trim().toLowerCase().replace(/[.!?]+$/g, ''),
+    );
+
+  const normalizedCommand = (text) =>
+    String(text || '').trim().toLowerCase().replace(/[.!?]+$/g, '');
+
+  const isProceedCommand = (text) =>
+    [
+      'pay it',
+      'do it',
+      'continue',
+      'proceed',
+      'confirm',
+      'generate it',
+      'book it',
+      'submit it',
+      'yes do it',
+      'ok do it',
+    ].includes(normalizedCommand(text));
+
   const sendMessage = async (messageOverride = '') => {
     const draftMessage = messageOverride || message;
 
@@ -839,9 +820,37 @@ function ChatPage() {
     setMessage('');
     setSelectedFiles([]);
     appendMessage({ sender: 'user', text: userMessage, attachments });
+    scrollToBottom();
+
+    if (
+      isCancelCommand(userMessage) &&
+      (pendingAction || pendingConfirmation || pendingSms)
+    ) {
+      await handleCancelAction();
+      return;
+    }
+
+    if (isProceedCommand(userMessage)) {
+      if (pendingConfirmation) {
+        await handleConfirmAction();
+        return;
+      }
+      if (pendingAction) {
+        await handleContinueAction();
+        return;
+      }
+    }
 
     setIsSending(true);
     setAssistantActivity(getActivityLabel(filesToSend.length > 0, userMessage));
+
+    // Carry the full context every turn: accumulated extracted fields, the
+    // suggested action, and any action whose fields are still being collected.
+    const outgoingAgentContext = {
+      ...agentContext,
+      extractedFields: stripPrivateResourceFields(agentContext?.extractedFields || {}),
+      pendingAction: pendingFieldAction,
+    };
 
     try {
       const response = filesToSend.length
@@ -849,6 +858,7 @@ function ChatPage() {
             message: userMessage,
             conversationHistory,
             profileContext: profile,
+            agentContext: outgoingAgentContext,
             files: filesToSend,
             token,
           })
@@ -857,7 +867,7 @@ function ChatPage() {
             payload: {},
             conversationHistory,
             profileContext: profile,
-            agentContext,
+            agentContext: outgoingAgentContext,
             token,
           });
 
@@ -867,15 +877,19 @@ function ChatPage() {
       setAgentContext(nextAgentContext);
       updateThreadMetadata({ agentContext: nextAgentContext });
 
+      if (shouldAppendAssistantMessage(response)) {
+        appendAssistantMessage({
+          text: buildAssistantText(response),
+          status: response.status,
+          details: buildAssistantDetails(response),
+          quickReplies: buildAssistantQuickReplies(response),
+        });
+      }
+    } catch (error) {
       appendAssistantMessage({
-        text: buildAssistantText(response),
-        status: response.status,
-        details: buildAssistantDetails(response),
-        quickReplies: buildAssistantQuickReplies(response),
-      });
-    } catch {
-      appendAssistantMessage({
-        text: 'I could not reach the banking assistant right now. Please try again.',
+        text:
+          error.response?.data?.message ||
+          'I could not reach the banking assistant right now. Please try again.',
         status: 'error',
       });
     } finally {
@@ -900,25 +914,6 @@ function ChatPage() {
     sendMessage(quickAction.prompt);
   };
 
-  const buildContextualQuickReplyPrompt = (reply) => {
-    const basePrompt = reply.prompt || reply.label;
-
-    if (!agentContext?.suggestedAction || reply.action) {
-      return basePrompt;
-    }
-
-    const contextFields = Object.entries(agentContext.extractedFields || {})
-      .filter(([, value]) => value !== undefined && value !== null && value !== '')
-      .map(([field, value]) => `${formatFieldLabel(field)} ${value}`)
-      .join(', ');
-
-    if (!contextFields) {
-      return basePrompt;
-    }
-
-    return `${basePrompt}. Current request context: ${agentContext.suggestedAction}, ${contextFields}`;
-  };
-
   const handleComposerKeyDown = (event) => {
     if (event.key !== 'Enter' || event.shiftKey) return;
     event.preventDefault();
@@ -936,6 +931,16 @@ function ChatPage() {
         payload: pendingAction.payload,
         token,
       });
+
+      if (response.status === 'confirmation_required' && response.data?.confirmationId) {
+        const confirmationResponse = await confirmAction({
+          confirmationId: response.data.confirmationId,
+          token,
+        });
+        handleExecutionResponse(confirmationResponse);
+        return;
+      }
+
       handleExecutionResponse(response);
     } catch (error) {
       appendAssistantMessage({
@@ -1039,12 +1044,14 @@ function ChatPage() {
       setPendingAction(null);
       setPendingConfirmation(null);
       setPendingSms(null);
+      setPendingFieldAction(null);
       setSmsCode('');
       setSmsError('');
       updateThreadMetadata({
         pendingAction: null,
         pendingConfirmation: null,
         pendingSms: null,
+        pendingFieldAction: null,
         smsCode: '',
         smsError: '',
       });
@@ -1063,6 +1070,11 @@ function ChatPage() {
   const handleMessageQuickReply = (reply) => {
     if (!reply || isSending || actionLoadingText) return;
 
+    if (reply.action === 'open_url' && reply.url) {
+      window.open(reply.url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+
     if (reply.action === 'upload') {
       handlePickFiles();
       return;
@@ -1073,7 +1085,16 @@ function ChatPage() {
         handleContinueAction();
         return;
       }
-      sendMessage(buildContextualQuickReplyPrompt(reply));
+      sendMessage(reply.prompt || reply.label);
+      return;
+    }
+
+    if (reply.action === 'confirm_pending') {
+      if (pendingConfirmation) {
+        handleConfirmAction();
+        return;
+      }
+      sendMessage(reply.prompt || reply.label);
       return;
     }
 
@@ -1082,11 +1103,11 @@ function ChatPage() {
         handleCancelAction();
         return;
       }
-      sendMessage(buildContextualQuickReplyPrompt(reply));
+      sendMessage(reply.prompt || reply.label);
       return;
     }
 
-    sendMessage(buildContextualQuickReplyPrompt(reply));
+    sendMessage(reply.prompt || reply.label);
   };
 
   if (!user) return null;
@@ -1130,7 +1151,7 @@ function ChatPage() {
           ref={fileInputRef}
           type="file"
           className="file-input"
-          accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.docx"
+          accept=".pdf,.png,.jpg,.jpeg,.webp,.txt,.csv,.json"
           multiple
           onChange={handleFileChange}
         />
@@ -1199,7 +1220,10 @@ function ChatPage() {
           </div>
         ) : (
           <>
-            <div className="chat-transcript" ref={transcriptRef}>
+            <div
+              className="chat-transcript"
+              ref={transcriptRef}
+            >
               <div className="message-list">
                 {messages.map((chatMessage) => (
                   <ChatMessage
@@ -1213,171 +1237,42 @@ function ChatPage() {
                   />
                 ))}
 
-                {/* Banking action prepared card */}
-                {pendingAction ? (
-                  <InlineAssistantPanel className="action-prepared-card">
-                <p className="eyebrow">Prepared action</p>
-                <div className="action-card-header">
-                  <h2>{pendingAction.displayName}</h2>
-                  <Badge tone={riskTone(pendingAction.riskLevel)}>
-                    {pendingAction.riskLevel || 'low'} risk
-                  </Badge>
-                </div>
-                {pendingAction.executionMode ? (
-                  <p className="execution-mode-line">
-                    <Badge
-                      tone={
-                        pendingAction.executionMode === 'external'
-                          ? 'success'
-                          : 'warning'
-                      }
-                    >
-                      {executionModeLabel(pendingAction.executionMode)}
-                    </Badge>
-                    <span>
-                      {pendingAction.executionMode === 'external'
-                        ? 'External connector configured.'
-                        : 'External connector not configured — sandbox fallback for MVP demonstration.'}
-                    </span>
-                  </p>
-                ) : null}
-                <ul className="detail-list">
-                  {pendingAction.summary.map((item) => (
-                    <li key={item}>{item}</li>
-                  ))}
-                </ul>
-                <div className="action-button-row">
-                  <Button
-                    type="button"
-                    onClick={handleContinueAction}
-                    disabled={Boolean(actionLoadingText)}
-                  >
-                    Continue
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={handleCancelAction}
-                    disabled={Boolean(actionLoadingText)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-                  </InlineAssistantPanel>
-                ) : null}
-
-                {/* Confirmation card */}
-                {pendingConfirmation ? (
-                  <InlineAssistantPanel className="confirmation-card">
-                <p className="eyebrow">Confirmation required</p>
-                <div className="action-card-header">
-                  <h2>{pendingConfirmation.actionName}</h2>
-                  <Badge tone={riskTone(pendingConfirmation.riskLevel)}>
-                    {pendingConfirmation.riskLevel} risk
-                  </Badge>
-                </div>
-                {pendingConfirmation.executionMode ? (
-                  <p className="execution-mode-line">
-                    <Badge
-                      tone={
-                        pendingConfirmation.executionMode === 'external'
-                          ? 'success'
-                          : 'warning'
-                      }
-                    >
-                      {executionModeLabel(pendingConfirmation.executionMode)}
-                    </Badge>
-                  </p>
-                ) : null}
-                <dl className="confirmation-meta">
-                  <div>
-                    <dt>Confirmation ID</dt>
-                    <dd>{pendingConfirmation.confirmationId}</dd>
-                  </div>
-                  <div>
-                    <dt>Expires at</dt>
-                    <dd>{pendingConfirmation.expiresAt}</dd>
-                  </div>
-                </dl>
-                {pendingConfirmation.summary?.length ? (
-                  <ul className="detail-list">
-                    {pendingConfirmation.summary.map((item) => (
-                      <li key={item}>{item}</li>
-                    ))}
-                  </ul>
-                ) : null}
-                <div className="action-button-row">
-                  <Button
-                    type="button"
-                    onClick={handleConfirmAction}
-                    disabled={Boolean(actionLoadingText)}
-                  >
-                    Confirm
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={handleCancelAction}
-                    disabled={Boolean(actionLoadingText)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
-                  </InlineAssistantPanel>
-                ) : null}
-
                 {/* SMS verification card */}
                 {pendingSms ? (
                   <InlineAssistantPanel className="sms-card">
-                <p className="eyebrow">SMS verification</p>
-                <h2>Verify this secure banking action</h2>
-                <dl className="confirmation-meta">
-                  <div>
-                    <dt>Action</dt>
-                    <dd>{pendingSms.actionName}</dd>
-                  </div>
-                  <div>
-                    <dt>Confirmation ID</dt>
-                    <dd>{pendingSms.confirmationId}</dd>
-                  </div>
-                </dl>
-                {pendingSms.maskedPhoneNumber ? (
-                  <p>Code sent to: {pendingSms.maskedPhoneNumber}</p>
-                ) : null}
-                {pendingSms.expiresAt ? <p>Expires at: {pendingSms.expiresAt}</p> : null}
-                <label className="sms-code-field">
-                  SMS code
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={smsCode}
-                    placeholder="123456"
-                    maxLength={6}
-                    onChange={(event) => {
-                      setSmsCode(event.target.value);
-                      updateThreadMetadata({ smsCode: event.target.value });
-                    }}
-                    disabled={Boolean(actionLoadingText)}
-                  />
-                </label>
-                {smsError ? <p className="error-text">{smsError}</p> : null}
-                <div className="action-button-row">
-                  <Button
-                    type="button"
-                    onClick={handleVerifyAndExecute}
-                    disabled={Boolean(actionLoadingText)}
-                  >
-                    Verify and Execute
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={handleCancelAction}
-                    disabled={Boolean(actionLoadingText)}
-                  >
-                    Cancel
-                  </Button>
-                </div>
+                    <label className="sms-code-field">
+                      SMS code
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={smsCode}
+                        placeholder="123456"
+                        maxLength={6}
+                        onChange={(event) => {
+                          setSmsCode(event.target.value);
+                          updateThreadMetadata({ smsCode: event.target.value });
+                        }}
+                        disabled={Boolean(actionLoadingText)}
+                      />
+                    </label>
+                    {smsError ? <p className="error-text">{smsError}</p> : null}
+                    <div className="action-button-row">
+                      <Button
+                        type="button"
+                        onClick={handleVerifyAndExecute}
+                        disabled={Boolean(actionLoadingText)}
+                      >
+                        Verify
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={handleCancelAction}
+                        disabled={Boolean(actionLoadingText)}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
                   </InlineAssistantPanel>
                 ) : null}
 
@@ -1503,4 +1398,3 @@ function ChatPage() {
 }
 
 export default ChatPage;
-

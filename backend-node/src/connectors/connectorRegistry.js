@@ -1,9 +1,6 @@
 const mockDocumentConnector = require('./documents/mockDocument.connector');
 const externalDocumentConnector = require('./documents/externalDocument.connector');
 const hybridDocumentConnector = require('./documents/hybridDocument.connector');
-const mockComplaintConnector = require('./complaints/mockComplaint.connector');
-const externalComplaintConnector = require('./complaints/externalComplaint.connector');
-const hybridComplaintConnector = require('./complaints/hybridComplaint.connector');
 const mockAppointmentConnector = require('./appointments/mockAppointment.connector');
 const externalAppointmentConnector = require('./appointments/externalAppointment.connector');
 const hybridAppointmentConnector = require('./appointments/hybridAppointment.connector');
@@ -12,16 +9,27 @@ const externalPaymentConnector = require('./payments/externalPayment.connector')
 const hybridPaymentConnector = require('./payments/hybridPayment.connector');
 const sandboxTransferConnector = require('./transfers/sandboxTransfer.connector');
 const simulatedSmsConnector = require('./notifications/simulatedSms.connector');
+const internalAtbConnector = require('./internal/internalAtb.connector');
+const internalPaymentConnector = require('./internal/internalPayment.connector');
+const internalDocumentConnector = require('./internal/internalDocument.connector');
+const internalAppointmentConnector = require('./internal/internalAppointment.connector');
+const internalAccountConnector = require('./internal/internalAccount.connector');
 
-// This registry is the stable connector layer boundary. Demo connectors can be
-// replaced later with real ATB application connectors without changing actions.
+// This registry is the stable connector layer boundary. The normal action path
+// routes through the internal* connectors, which call the separate internal demo
+// services over HTTP. In production those service URLs are replaced by real ATB
+// internal APIs without changing the actions above. The legacy mock/sandbox/
+// external connectors are kept registered only for the read-only list_documents
+// action and for reference; they are not used by the high-value action path.
 const connectors = [
+  internalAccountConnector,
+  internalAtbConnector,
+  internalPaymentConnector,
+  internalDocumentConnector,
+  internalAppointmentConnector,
+  hybridDocumentConnector,
   mockDocumentConnector,
   externalDocumentConnector,
-  hybridDocumentConnector,
-  mockComplaintConnector,
-  externalComplaintConnector,
-  hybridComplaintConnector,
   mockAppointmentConnector,
   externalAppointmentConnector,
   hybridAppointmentConnector,

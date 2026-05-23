@@ -2,6 +2,7 @@ const { spawn } = require("node:child_process");
 const path = require("node:path");
 
 const rootDir = path.resolve(__dirname, "..", "..");
+const internalServicesDir = path.join(rootDir, "internal-services-demo");
 const services = [
   {
     name: "api",
@@ -22,6 +23,36 @@ const services = [
     script: path.join(__dirname, "web.js"),
     readyPattern: /local:|localhost:5173|127\.0\.0\.1:5173/i,
   },
+  {
+    name: "pay",
+    url: "http://localhost:7101",
+    script: path.join(internalServicesDir, "payment-service", "server.js"),
+    readyPattern: /running on port 7101/i,
+  },
+  {
+    name: "doc",
+    url: "http://localhost:7102",
+    script: path.join(internalServicesDir, "document-service", "server.js"),
+    readyPattern: /running on port 7102/i,
+  },
+  {
+    name: "atb",
+    url: "http://localhost:7106",
+    script: path.join(internalServicesDir, "atb-service", "server.js"),
+    readyPattern: /running on port 7106/i,
+  },
+  {
+    name: "apt",
+    url: "http://localhost:7104",
+    script: path.join(internalServicesDir, "appointment-service", "server.js"),
+    readyPattern: /running on port 7104/i,
+  },
+  {
+    name: "acc",
+    url: "http://localhost:7105",
+    script: path.join(internalServicesDir, "account-service", "server.js"),
+    readyPattern: /running on port 7105/i,
+  },
 ];
 
 const children = new Map();
@@ -33,9 +64,16 @@ console.log("========================================");
 console.log(" Open the app:");
 console.log(" http://localhost:5173");
 console.log("");
-console.log(" Internal services:");
+console.log(" Core services:");
 console.log(" Backend API: http://localhost:5000/health");
 console.log(" AI Service:  http://localhost:8000/health");
+console.log("");
+console.log(" Internal demo services:");
+console.log(" Payment:     http://localhost:7101/health");
+console.log(" Document:    http://localhost:7102/health");
+console.log(" ATB:         http://localhost:7106/health");
+console.log(" Appointment: http://localhost:7104/health");
+console.log(" Account:     http://localhost:7105/health");
 console.log("========================================");
 
 function stripAnsi(value) {

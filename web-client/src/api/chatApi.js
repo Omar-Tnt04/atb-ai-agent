@@ -64,6 +64,7 @@ export const sendChatMessageWithFiles = async ({
   message,
   conversationHistory,
   profileContext,
+  agentContext,
   files,
   token,
 }) => {
@@ -71,6 +72,7 @@ export const sendChatMessageWithFiles = async ({
   formData.append('message', message);
   formData.append('conversationHistory', JSON.stringify(conversationHistory || []));
   formData.append('profileContext', JSON.stringify(profileContext || {}));
+  formData.append('agentContext', JSON.stringify(agentContext || {}));
 
   files.forEach((file) => {
     formData.append('files', file);

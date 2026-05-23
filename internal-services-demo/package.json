@@ -1,0 +1,17 @@
+{
+  "name": "atb-internal-services-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local Express services that simulate ATB internal applications (payments, documents, ATB, appointments, accounts). In production these are replaced by real ATB internal APIs.",
+  "type": "commonjs",
+  "scripts": {
+    "start:payment": "node payment-service/server.js",
+    "start:document": "node document-service/server.js",
+    "start:atb": "node atb-service/server.js",
+    "start:appointment": "node appointment-service/server.js",
+    "start:account": "node account-service/server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

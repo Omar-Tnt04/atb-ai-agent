@@ -12,8 +12,8 @@ export const getConnectors = async (token) => {
   return response.data;
 };
 
-export const getExternalStatus = async (token) => {
-  const response = await apiClient.get('/integrations/external/status', {
+export const getInternalServiceStatus = async (token) => {
+  const response = await apiClient.get('/integrations/internal/status', {
     headers: authHeaders(token),
   });
 

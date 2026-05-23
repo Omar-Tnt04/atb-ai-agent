@@ -10,14 +10,40 @@ Local MVP / Proof of Concept for a secure AI banking assistant for ATB.
 - Python / FastAPI AI Service
 - Ollama Open-Source LLM
 - Supabase PostgreSQL
-- Mock REST APIs
+- Internal Demo Services (separate local Express apps)
 - Risk-Based SMS Verification
 - Admin Dashboard
 - Audit Logging
 
 ## Main Objective
 
-Build an authenticated AI banking agent that understands banking requests, selects available actions, checks permissions, asks for confirmation, applies SMS verification for high-risk actions, executes mock API calls, and returns clear results inside the chat.
+Build an authenticated AI banking agent that understands banking requests, selects available actions, checks permissions, asks for confirmation, applies SMS verification for high-risk actions, routes execution through internal service connectors, and returns clear results inside the chat.
+
+## Internal Services Demo
+
+The MVP uses separate local Express services to simulate ATB internal applications. The AI agent does not execute actions directly. It detects intent, then the backend orchestrator calls the appropriate internal service through a connector. In production, these local service URLs are replaced by real ATB internal APIs.
+
+### Architecture
+
+```text
+User → React Chat → Node Backend Orchestrator → Python AI Service → Action Registry → Connector → Internal Demo Service API → Result → Admin Dashboard
+```
+
+### Internal services
+
+| Service              | Port | Purpose                          |
+| -------------------- | ---- | -------------------------------- |
+| payment-service      | 7101 | Bill payments and transfers      |
+| document-service     | 7102 | Document generation and download |
+| atb-service          | 7106 | Customers, cards, branches, products, and complaints |
+| appointment-service  | 7104 | Branch appointment slots/booking |
+| account-service      | 7105 | Account balance lookups          |
+
+Each service exposes `GET /health`. The backend connectors call these services
+over HTTP. If a service is disabled, offline, or unreachable, the action is not
+executed against a mock fallback — the agent returns a clean
+`The internal service is currently unavailable.` message and the failed attempt
+is audited.
 
 ## Run the full MVP locally
 
@@ -51,12 +77,20 @@ npm run dev:separate
 
 This opens separate terminals.
 
+`npm run dev` starts all processes with readable prefixes:
+`[api]`, `[ai]`, `[web]`, `[pay]`, `[doc]`, `[atb]`, `[apt]`, `[acc]`.
+
 Run individual services:
 
 ```bash
 npm run dev:backend
 npm run dev:ai
 npm run dev:web
+npm run dev:pay
+npm run dev:doc
+npm run dev:atb
+npm run dev:apt
+npm run dev:acc
 ```
 
 Open the web app at:
@@ -76,23 +110,24 @@ USER accounts open the Chat experience. ADMIN accounts open the Admin Dashboard.
 
 ## Chat file uploads
 
-The chat supports local MVP uploads for documents and images. Text extraction
-works for common document formats such as TXT, CSV, PDF, and DOCX. Image
-uploads are stored as attachment metadata for now, with OCR or multimodal AI
-understanding ready to be connected later.
+The chat supports local MVP uploads for banking PDFs and images, plus simple
+TXT, CSV, and JSON files. PDF text extraction, scanned/image PDF handling,
+image OCR, and text/CSV/JSON understanding are handled by the backend file
+context service.
 
-## External connected services
+## Connector layer
 
-The backend has a connector layer for future ATB integrations. Actions can call
-hybrid connectors that try an external service first, then safely fall back to
-the current mock or sandbox connector when the external service is disabled,
-missing, timed out, or unavailable.
+The backend has a stable connector layer that is the boundary between actions
+and the services that perform them. In this MVP the normal action path routes
+through internal connectors that call the internal demo services over HTTP. In
+production, the connectors point at real ATB internal APIs without changing the
+action registry.
 
-External API keys and service URLs belong only in the backend `.env`; the
-frontend and AI service do not receive or call those APIs directly. The AI only
+Service URLs and any credentials belong only in the backend `.env`; the frontend
+and AI service do not receive or call those services directly. The AI only
 selects an allowed action. The backend performs permission checks,
 confirmation/SMS flow, connector execution, and audit logging.
 
 Use `GET /integrations/connectors` to list available connector operations and
-`GET /integrations/external/status` to see safe enabled/configured status for
-external services without exposing secrets.
+`GET /integrations/internal/status` to see each internal service as
+`Connected`, `Offline`, or `Disabled`.
