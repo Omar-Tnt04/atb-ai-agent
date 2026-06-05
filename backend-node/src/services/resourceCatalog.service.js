@@ -1082,7 +1082,6 @@ const summarizeMatchedEntry = (entry, messageText) => ({
 const safeResourceId = (entry = {}) =>
   entry.metadata?.resourceId ||
   entry.fileName ||
-  entry.metadata?.title ||
   'unknown_resource';
 
 const scoreCatalogEntries = (catalog, messageText, options = {}) => {
@@ -1298,7 +1297,7 @@ const findMatchingResources = async (messageText, options = {}) => {
     const reason = 'image_resources_disabled';
     if (useSemanticSearch) {
       logAgentStep(options.requestId, 'semantic_resource_search_started', {
-        searchQuery: messageText,
+        searchQueryLength: messageText.length,
         filters: {
           limit,
           minScore,
@@ -1309,7 +1308,7 @@ const findMatchingResources = async (messageText, options = {}) => {
         indexPath: CATALOG_URL,
       });
       logAgentStep(options.requestId, 'semantic_resource_no_match', {
-        searchQuery: messageText,
+        searchQueryLength: messageText.length,
         reason,
         bestScore: 0,
         secondScore: null,
@@ -1323,7 +1322,7 @@ const findMatchingResources = async (messageText, options = {}) => {
   }
   if (useSemanticSearch) {
     logAgentStep(options.requestId, 'semantic_resource_search_started', {
-      searchQuery: messageText,
+      searchQueryLength: messageText.length,
       filters: {
         limit,
         minScore,
@@ -1349,10 +1348,9 @@ const findMatchingResources = async (messageText, options = {}) => {
       minMargin: options.minMargin,
     });
     const topCandidates = scoredEntries.slice(0, 3).map((entry) => ({
-      title: entry.metadata?.title || entry.metadata?.name || entry.fileName,
+      resourceId: safeResourceId(entry),
       type: entry.metadata?.resourceType || entry.metadata?.type || entry.metadata?.category,
       score: entry.score,
-      fileUrl: entry.metadata?.fileUrl || entry.metadata?.documentUrl || entry.metadata?.url || null,
     }));
 
     logAgentStep(options.requestId, 'semantic_resource_candidates_found', {
@@ -1365,7 +1363,7 @@ const findMatchingResources = async (messageText, options = {}) => {
     logArchitecture('semantic_resource_search', {
       requestId: options.requestId,
       threadId: options.threadId,
-      query: messageText,
+      queryLength: messageText.length,
       minScore: selection.minScore,
       minMargin: selection.minMargin,
       selectionReason: selection.reason,
@@ -1374,7 +1372,7 @@ const findMatchingResources = async (messageText, options = {}) => {
 
     if (!selection.matches.length) {
       logAgentStep(options.requestId, 'semantic_resource_no_match', {
-        searchQuery: messageText,
+        searchQueryLength: messageText.length,
         reason: selection.reason,
         bestScore: selection.bestScore,
         secondScore: selection.secondScore || null,
@@ -1383,7 +1381,7 @@ const findMatchingResources = async (messageText, options = {}) => {
         topCandidates,
       });
       console.log('[resource-catalog] semantic no confident match:', {
-        query: messageText,
+        queryLength: messageText.length,
         reason: selection.reason,
         bestScore: selection.bestScore,
         minScore: selection.minScore,
@@ -1394,14 +1392,13 @@ const findMatchingResources = async (messageText, options = {}) => {
 
     const best = selection.matches[0];
     console.log('[resource-catalog] semantic selected resource:', {
-      title: best.metadata?.title || best.fileName,
+      resourceId: safeResourceId(best),
       resourceType: best.metadata?.resourceType,
       score: best.score,
     });
     logArchitecture('semantic_resource_selected', {
       requestId: options.requestId,
       threadId: options.threadId,
-      selectedResourceTitle: best.metadata?.title || best.fileName,
       selectedResourceId: safeResourceId(best),
       category: best.metadata?.resourceType,
       score: best.score,
@@ -1443,19 +1440,21 @@ const findMatchingResources = async (messageText, options = {}) => {
     }
   }
   const topCandidates = scoredEntries.slice(0, 3).map((entry) => ({
-    title: entry.metadata?.title || entry.fileName,
+    resourceId: safeResourceId(entry),
     resourceType: entry.metadata?.resourceType,
     score: entry.score,
   }));
 
-  console.log('[resource-catalog] resource query:', messageText);
+  console.log('[resource-catalog] resource query:', {
+    queryLength: messageText.length,
+  });
   console.log('[resource-catalog] top candidates:', topCandidates);
   logArchitecture('laragon_resource_search', {
     requestId: options.requestId,
     threadId: options.threadId,
-    query: messageText,
+    queryLength: messageText.length,
     topMatches: topCandidates.map((entry) => ({
-      title: entry.title,
+      resourceId: entry.resourceId,
       score: entry.score,
       category: entry.resourceType,
     })),
@@ -1471,14 +1470,13 @@ const findMatchingResources = async (messageText, options = {}) => {
   } else {
     const best = scored[0];
     console.log('[resource-catalog] selected resource:', {
-      title: best.metadata?.title || best.fileName,
+      resourceId: safeResourceId(best),
       resourceType: best.metadata?.resourceType,
       score: best.score,
     });
     logArchitecture('laragon_resource_selected', {
       requestId: options.requestId,
       threadId: options.threadId,
-      selectedResourceTitle: best.metadata?.title || best.fileName,
       selectedResourceId: safeResourceId(best),
       category: best.metadata?.resourceType,
       fileUrlExists: Boolean(best.metadata?.fileUrl || best.metadata?.documentUrl || best.metadata?.url),

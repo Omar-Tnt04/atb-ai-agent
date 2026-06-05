@@ -21,9 +21,9 @@ const RESOURCE_HINTS = [
 
 const isEnabled = () => process.env.ATB_DEBUG_LOGS === 'true';
 
-const shouldSaveAiContext = () => process.env.DEBUG_SAVE_AI_CONTEXT === 'true';
+const shouldSaveAiContext = () => false;
 
-const truncate = (value = '', max = 250) => {
+const truncate = (value = '', max = 160) => {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   return text.length > max ? `${text.slice(0, max - 3)}...` : text;
 };
@@ -69,6 +69,18 @@ const maskString = (value) => {
 
 const redact = (value, key = '') => {
   const normalizedKey = String(key || '').toLowerCase();
+
+  if (/(message|query|goal|reason|assistant|response|context|prompt)/i.test(normalizedKey)) {
+    if (typeof value === 'string') {
+      return `[text length=${value.length}]`;
+    }
+    if (value && typeof value === 'object') {
+      return {
+        keys: Object.keys(value).slice(0, 20),
+        itemCount: Array.isArray(value) ? value.length : undefined,
+      };
+    }
+  }
 
   if (
     /(password|otp|token|api.?key|authorization|secret|passport|cin)/i.test(normalizedKey)

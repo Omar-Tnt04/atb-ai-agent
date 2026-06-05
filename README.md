@@ -35,6 +35,21 @@ Checkpoint 2 follows the supervisor-requested Ollama-first flow conceptually:
 - Backend validates and executes resource lookups/actions. Laragon JSON/PDF URLs, internal services, confirmations, SMS verification, and audit logs stay backend-controlled.
 - Frontend displays the final Markdown answer, quick actions, Download PDF, Confirm, and Cancel controls.
 
+### Checkpoint 3 hybrid routing
+
+The main flow uses a hybrid, resource-first architecture. The backend searches
+and resolves resources before any model call, so normal JSON, TXT, PDF-text,
+and resource questions are handled with `qwen2.5:7b`. `qwen3-vl:8b` is reserved
+for images, scanned PDFs, and explicit visual reasoning.
+
+Backend RAM does not cache raw PDFs, images, base64 payloads, full prompts, or
+full model responses. The vision-summary cache is disabled by default; if a
+production cache is added later, it should store only small extracted JSON
+outside app memory, never raw files.
+
+The benchmark script compares `qwen2.5:7b` and `qwen3-vl:8b` and exports both
+CSV and JSON results.
+
 ### Internal services
 
 | Service              | Port | Purpose                          |

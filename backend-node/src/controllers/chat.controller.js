@@ -4,6 +4,7 @@ const {
   getConnectedActionsByRole,
 } = require('../actions/actionRegistry');
 const env = require('../config/env');
+const { selectModel } = require('../config/modelRouting');
 const { executeAction } = require('../services/actionExecution.service');
 const { prepareAction } = require('../services/actionPreparation.service');
 const {
@@ -51,6 +52,7 @@ const {
   isMetadataAnswerLikelyEnough,
 } = require('../services/resourceAnswer.service');
 const {
+  appearsToNeedResourceLookup,
   buildPlannerParseFallbackDecision,
   buildPlannerRouterDecision,
   normalizePlannerDecision,
@@ -414,13 +416,13 @@ const runIntentPlanner = async ({
     logAgentStep(trace?.requestId, 'planner_finished', {
       mode: plannerDecision.mode,
       needsResourceSearch: plannerDecision.needsResourceSearch,
-      resourceSearchQuery: plannerDecision.resourceSearchQuery,
+      resourceSearchQueryLength: String(plannerDecision.resourceSearchQuery || '').length,
       needsActionFlow: plannerDecision.needsActionFlow,
       needsDownload: plannerDecision.needsDownload,
       actionType: plannerDecision.actionType,
-      userGoal: plannerDecision.userGoal,
+      userGoalLength: String(plannerDecision.userGoal || '').length,
       confidence: plannerDecision.confidence,
-      reason: plannerDecision.reason,
+      reasonLength: String(plannerDecision.reason || '').length,
     });
     return { plannerDecision, error: null };
   } catch (error) {
@@ -1843,11 +1845,11 @@ const sanitizeResolvedResourceContextForAi = (resourceContext) => {
   } = resourceContext;
   void pdfBase64;
   void fileBuffer;
-  void fileText;
+  const shouldIncludeText = safeContext.extractionStatus === 'extracted' && typeof fileText === 'string';
   void fileTextPreview;
   return {
     ...safeContext,
-    fileText: '',
+    fileText: shouldIncludeText ? fileText : '',
     fileTextPreview: '',
   };
 };
@@ -1888,7 +1890,7 @@ const toResolvedResourceContext = ({
   resourceJson: resolved.resourceJson,
   fileUrl: resolved.fileUrl,
   fileTextPreview: '',
-  fileText: '',
+  fileText: resolved.fileText || '',
   pdfBase64: resolved.fileBuffer ? resolved.fileBuffer.toString('base64') : null,
   fileSize: resolved.fileSize || null,
   contentType: resolved.contentType,
@@ -1931,12 +1933,11 @@ const resolveMatchedResourceContext = async ({
       : await resolveResourcePayload(matchedResource.metadata);
     logAgentStep(requestId, 'pdf_result', {
       success: resolved.extractionStatus !== 'failed',
-      fileUrl: resolved.fileUrl || matchedResource?.metadata?.fileUrl || null,
-      path: resourceUrl || null,
+      resourceId: matchedResource?.fileName || null,
       elapsedMs: endTimer(timer),
       charCount: resolved.fileText ? String(resolved.fileText).length : 0,
       pageCount: resolved.pageCount || null,
-      preview: truncate(resolved.fileText || resolved.fileTextPreview || '', 300),
+      extractionStatus: resolved.extractionStatus,
     });
     return toResolvedResourceContext({
       resolved,
@@ -1951,12 +1952,11 @@ const resolveMatchedResourceContext = async ({
       const resolved = await resolveResourcePayload(matchedResource.metadata);
       logAgentStep(requestId, 'pdf_result', {
         success: resolved.extractionStatus !== 'failed',
-        fileUrl: resolved.fileUrl || matchedResource.metadata?.fileUrl || null,
-        path: resourceUrl || null,
+        resourceId: matchedResource?.fileName || null,
         elapsedMs: endTimer(timer),
         charCount: resolved.fileText ? String(resolved.fileText).length : 0,
         pageCount: resolved.pageCount || null,
-        preview: truncate(resolved.fileText || resolved.fileTextPreview || '', 300),
+        extractionStatus: resolved.extractionStatus,
       });
       return toResolvedResourceContext({
         resolved: {
@@ -1974,12 +1974,11 @@ const resolveMatchedResourceContext = async ({
 
     logAgentStep(requestId, 'pdf_result', {
       success: false,
-      fileUrl: null,
-      path: resourceUrl || null,
+      resourceId: null,
       elapsedMs: endTimer(timer),
       charCount: 0,
       pageCount: null,
-      preview: '',
+      extractionStatus: 'failed',
     });
     return {
       resourceUrl,
@@ -2046,10 +2045,9 @@ const buildResolvedResourceCandidates = async (resourceQuery, options = {}) => {
   logAgentStep(options.requestId, 'resource_candidates_found', {
     count: matchedResources.length,
     candidates: matchedResources.slice(0, 3).map((resource) => ({
-      title: resource.metadata?.title || resource.fileName,
+      resourceId: resource.fileName,
       type: resource.metadata?.resourceType || resource.metadata?.type || null,
       score: resource.score,
-      fileUrl: resource.metadata?.fileUrl || resource.metadata?.documentUrl || resource.metadata?.url || null,
     })),
   });
 
@@ -2062,8 +2060,8 @@ const buildResolvedResourceCandidates = async (resourceQuery, options = {}) => {
     const resourceUrl = matchedResource.url || null;
     if (matchedResource) {
       console.log('[resource-catalog] resource candidate:', {
+        resourceId: matchedResource.fileName || 'unknown_resource',
         resourceType: matchedResource.metadata?.resourceType || 'unknown',
-        title: matchedResource.metadata?.title || 'unknown',
         score: matchedResource.score,
       });
     }
@@ -2081,10 +2079,9 @@ const buildResolvedResourceCandidates = async (resourceQuery, options = {}) => {
   const selectedJson = selectedContext?.resourceJson || selectedContext?.matchedResource || {};
   if (selectedContext) {
     logAgentStep(options.requestId, 'resource_selected', {
-      title: selectedJson.title || selectedContext.matchedResource?.title || selectedContext.matchedResource?.fileName || null,
+      resourceId: selectedContext.matchedResource?.fileName || selectedJson.resourceId || null,
       type: selectedJson.resourceType || selectedContext.matchedResource?.resourceType || null,
-      fileUrl: selectedContext.fileUrl || selectedJson.fileUrl || selectedJson.documentUrl || null,
-      reason: 'Highest scoring resource candidate selected for this request.',
+      reasonCode: 'highest_scoring_resource_candidate',
       metadata: safeMetadata(selectedJson),
     });
   }
@@ -2098,8 +2095,8 @@ const buildResolvedResourceContext = async (resourceQuery, options = {}) => {
 
   if (best?.matchedResource) {
     console.log('[resource-catalog] resource selected:', {
+      resourceId: best.matchedResource.fileName || 'unknown_resource',
       resourceType: best.matchedResource.resourceType || 'unknown',
-      title: best.matchedResource.title || 'unknown',
       score: best.matchedResource.score,
     });
   }
@@ -4794,7 +4791,20 @@ const sendRoutedResponse = async ({
   });
 
   logFinalResponse(trace, finalResponse, response.status);
-  return res.json(finalResponse);
+  const result = res.json(finalResponse);
+  if (finalResponse.data?.ai) {
+    finalResponse.data.ai.assistantMessage = '';
+    finalResponse.data.ai.markdown = '';
+    finalResponse.data.ai.extractedFields = {};
+  }
+  logArchitecture('request_temp_cleanup_done', {
+    requestId: trace?.requestId,
+    threadId: trace?.threadId,
+    request_temp_cleanup_done: true,
+    context_chars_before: 0,
+    context_chars_after: 0,
+  });
+  return result;
 };
 
 const buildUnsafeRequestResponse = () => {
@@ -5659,7 +5669,7 @@ const buildRoutedVisionResponse = async ({
 
   const resourceId = getResourceIdForCache(resourceContext);
   const cachedVisionResult =
-    getPdfVisionCache({ resourceId, pdfUrl: resourceContext.fileUrl }) ||
+    getPdfVisionCache({ resourceId, pdfUrl: resourceContext.fileUrl, requestId: trace.requestId }) ||
     memory.lastVisionResult ||
     null;
   const pageSelection = selectPdfPages({
@@ -5671,7 +5681,7 @@ const buildRoutedVisionResponse = async ({
 
   console.log('[agent-router] selected PDF pages:', {
     case: routerDecision.case,
-    resource: resourceContext.resourceJson?.title || fileName,
+    resourceId,
     pages: pageSelection.pages,
     reason: pageSelection.reason,
   });
@@ -5705,6 +5715,7 @@ const buildRoutedVisionResponse = async ({
     resourceId,
     pdfUrl: resourceContext.fileUrl,
     visionResult,
+    requestId: trace.requestId,
   });
 
   return {
@@ -5827,6 +5838,251 @@ const buildActionAiFromMatchedResource = ({ message = '', routerDecision = {}, r
     },
     safeResource,
   };
+};
+
+const RESOURCE_FIRST_ACTION_TERMS =
+  /\b(pay|bill|invoice|receipt|saved beneficiary|beneficiary profile|dispute|complaint|appointment|card pickup|replacement|standing order)\b/i;
+
+const shouldTryResourceFirst = (message = '', routerDecision = {}) => {
+  if (routerDecision.case === CASES.UNSAFE_REQUEST) return false;
+  if (routerDecision.needsResourceSearch || routerDecision.resourceHint) return true;
+  if (routerDecision.needsActionFlow && RESOURCE_FIRST_ACTION_TERMS.test(message)) return true;
+  if (appearsToNeedResourceLookup(message)) return true;
+  return false;
+};
+
+const resourceTypeForMetrics = (resourceContext = {}) =>
+  resourceContext.resourceFileType ||
+  resourceContext.resourceJson?.resourceType ||
+  resourceContext.matchedResource?.resourceType ||
+  resourceContext.contentType ||
+  'unknown';
+
+const isExplicitVisualReasoningRequest = (message = '', routerDecision = {}) => {
+  if (routerDecision.explicitPage) return true;
+  const text = normalizeText(message);
+  return /\b(visual|visually|image|picture|screenshot|scan|scanned|layout|signature|stamp|page\s+\d+)\b/.test(text);
+};
+
+const visionRequirementForResource = ({ message = '', routerDecision = {}, resourceContext = {} } = {}) => {
+  if (resourceContext.needsVision) {
+    return {
+      visionRequired: true,
+      reason: resourceContext.resourceFileType === 'image'
+        ? 'selected_resource_is_image'
+        : resourceContext.extractionStatus || 'selected_resource_requires_vision',
+    };
+  }
+
+  if (isExplicitVisualReasoningRequest(message, routerDecision)) {
+    return {
+      visionRequired: true,
+      reason: routerDecision.explicitPage
+        ? 'explicit_page_question'
+        : 'explicit_visual_reasoning',
+    };
+  }
+
+  return {
+    visionRequired: false,
+    reason: resourceContext.extractionStatus === 'extracted'
+      ? 'resource_text_extracted'
+      : 'resource_metadata_or_text_available',
+  };
+};
+
+const logResourceFirstMetrics = ({
+  trace,
+  resourceContext = null,
+  visionRequired = false,
+  visionRequiredReason = 'not_applicable',
+}) => {
+  const selection = selectModel({ requiresVision: visionRequired });
+  logArchitecture('resource_first_routing', {
+    requestId: trace?.requestId,
+    threadId: trace?.threadId,
+    resource_first_used: Boolean(resourceContext),
+    resource_type: resourceTypeForMetrics(resourceContext || {}),
+    vision_required: Boolean(visionRequired),
+    vision_required_reason: visionRequiredReason,
+    selected_model: selection.selectedModel,
+    resourceId: getResourceIdForCache(resourceContext || {}),
+  });
+};
+
+const buildResourceFirstResponse = async ({
+  req,
+  res,
+  message,
+  payload,
+  deterministicRouterDecision,
+  memory,
+  threadId,
+  trace,
+}) => {
+  if (!shouldTryResourceFirst(message, deterministicRouterDecision)) {
+    return null;
+  }
+
+  const resourceQuery = deterministicRouterDecision.resourceHint || message;
+  const candidates = await buildResolvedResourceCandidates(resourceQuery, {
+    originalMessage: message,
+    requestId: trace?.requestId,
+    threadId: trace?.threadId,
+    limit: 5,
+  });
+  const resourceContext = candidates[0] || null;
+
+  if (!resourceContext) {
+    logResourceFirstMetrics({
+      trace,
+      resourceContext: null,
+      visionRequired: false,
+      visionRequiredReason: 'resource_not_found',
+    });
+    return null;
+  }
+
+  const visionRequirement = visionRequirementForResource({
+    message,
+    routerDecision: deterministicRouterDecision,
+    resourceContext,
+  });
+  logResourceFirstMetrics({
+    trace,
+    resourceContext,
+    visionRequired: visionRequirement.visionRequired,
+    visionRequiredReason: visionRequirement.reason,
+  });
+
+  const resourceJson = resourceContext.resourceJson || {};
+  const actionRouterDecision = {
+    ...deterministicRouterDecision,
+    case: CASES.LARAGON_RESOURCE_METADATA,
+    modelMode: 'text',
+    needsResourceSearch: true,
+    needsPdfVision: false,
+    resourceHint: resourceQuery,
+  };
+
+  const inferredResourceActionName = inferActionNameFromMessageAndResource({
+    message,
+    routerDecision: actionRouterDecision,
+    resourceJson,
+  });
+  if (
+    deterministicRouterDecision.needsActionFlow &&
+    inferredResourceActionName &&
+    shouldPrepareActionFromMatchedResource({
+      message,
+      routerDecision: actionRouterDecision,
+      resourceJson,
+    })
+  ) {
+    const { ai, safeResource } = buildActionAiFromMatchedResource({
+      message,
+      routerDecision: actionRouterDecision,
+      resourceContext,
+      req,
+    });
+    updateAgentMemory({
+      userId: req.user.id,
+      threadId,
+      lastActiveResource: safeResource,
+      lastTopic: safeResource.title || resourceQuery,
+    });
+    return dispatchByAgentMode({
+      res,
+      req,
+      ai,
+      trace,
+      message,
+      payload,
+      conversationHistory: memoryConversationHistory(memory),
+      fileContext: null,
+    });
+  }
+
+  if (deterministicRouterDecision.needsActionFlow) {
+    return null;
+  }
+
+  if (visionRequirement.visionRequired) {
+    if (!resourceContext.pdfBase64 || resourceContext.resourceFileType === 'image') {
+      return null;
+    }
+    const vision = await buildVisionResponseFromResourceCandidates({
+      req,
+      trace,
+      message,
+      conversationHistory: memoryConversationHistory(memory),
+      profileContext: {},
+      agentContext: {},
+      aiDecision: {},
+      candidates,
+      pageNumbers: deterministicRouterDecision.explicitPage
+        ? [deterministicRouterDecision.explicitPage]
+        : null,
+      detailMode: Boolean(deterministicRouterDecision.explicitPage),
+    });
+    return vision?.visionResult || null;
+  }
+
+  if (deterministicRouterDecision.case === CASES.RESOURCE_DOWNLOAD) {
+    return null;
+  }
+
+  const responseStyle = classifyResourceResponseStyle({
+    message,
+    resourceJson,
+    routerDecision: deterministicRouterDecision,
+    defaultStyle: RESPONSE_STYLES.RESOURCE_QUESTION_ANSWER,
+  });
+  const fileUrl = resourceContext.fileUrl || resourceJson.fileUrl || resourceJson.documentUrl || resourceJson.url || null;
+  const downloadAction = responseStyle === RESPONSE_STYLES.DOCUMENT_SUMMARY
+    ? buildPdfDownloadAction({
+        fileUrl,
+        fileName: getFileNameFromUrl(fileUrl || resourceContext.matchedResource?.fileName || ''),
+        resourceId: resourceJson.resourceId || resourceContext.matchedResource?.fileName || null,
+        title: resourceJson.title || resourceContext.matchedResource?.title || null,
+      })
+    : null;
+  const response = await buildResourceResponseWriterResponse({
+    req,
+    message,
+    trace,
+    routerDecision: {
+      ...deterministicRouterDecision,
+      modelMode: 'text',
+      needsPdfVision: false,
+      needsResourceSearch: true,
+    },
+    resourceContext,
+    responseStyle,
+    status: 'resource_metadata',
+    quickActions: downloadAction ? [downloadAction] : [],
+    writerMode: responseStyle === RESPONSE_STYLES.DOCUMENT_SUMMARY
+      ? 'resource_document'
+      : 'resource_qa',
+  });
+  const safeResource = sanitizeResourceMetadata({
+    ...(resourceJson || {}),
+    fileName: resourceContext.matchedResource?.fileName,
+    ...(downloadAction
+      ? {
+          downloadId: downloadAction.id,
+          safeDownloadUrl: downloadAction.downloadUrl,
+        }
+      : {}),
+  });
+
+  updateAgentMemory({
+    userId: req.user.id,
+    threadId,
+    lastActiveResource: safeResource,
+    lastTopic: safeResource.title || resourceQuery,
+  });
+  return response;
 };
 
 const handleRoutedChatMessage = async ({
@@ -5956,11 +6212,11 @@ const handleRoutedChatMessage = async ({
         selectedCase: routerDecision.case,
         needsActionFlow: routerDecision.needsActionFlow,
         actionName: inferredActionName,
-        resourceTitle: resourceJson.title || matches[0].fileName || null,
+        resourceId: resourceJson.resourceId || matches[0].fileName || null,
       });
       logAgentStep(trace?.requestId, 'resource_to_action_preparation_started', {
         actionType: inferredActionName,
-        title: resourceJson.title || matches[0].fileName || null,
+        resourceId: resourceJson.resourceId || matches[0].fileName || null,
         status: resourceJson.status || null,
       });
       const { ai, safeResource } = buildActionAiFromMatchedResource({
@@ -6216,7 +6472,7 @@ const handleRoutedChatMessage = async ({
       selectedCase: routerDecision.case,
       aiDecision: aiDecision.decision,
       action: aiDecision.action,
-      resourceQuery: aiDecision.resourceQuery,
+      resourceQueryLength: String(aiDecision.resourceQuery || '').length,
     });
 
     if (aiDecision.decision === 'ask_clarification') {
@@ -6513,7 +6769,7 @@ const runOllamaFirstChat = async ({
 
   console.log('[chat/message] AI first decision:', aiDecision.decision);
   console.log('[chat/message] AI first intent:', aiDecision.intent);
-  console.log('[chat/message] AI first resourceQuery:', aiDecision.resourceQuery);
+  console.log('[chat/message] AI first resourceQueryLength:', String(aiDecision.resourceQuery || '').length);
 
   if (
     isWidgetChatRequest(req) &&
@@ -6988,6 +7244,35 @@ const handleChatMessage = async (req, res) => {
         selectedCase: deterministicRouterDecision.case,
       });
     }
+
+    const resourceFirstResponse = await buildResourceFirstResponse({
+      req,
+      res,
+      message,
+      payload,
+      deterministicRouterDecision,
+      memory,
+      threadId,
+      trace,
+    });
+    if (resourceFirstResponse) {
+      if (res.headersSent) {
+        return resourceFirstResponse;
+      }
+      return sendRoutedResponse({
+        res,
+        req,
+        threadId,
+        trace,
+        message,
+        routerDecision: {
+          ...deterministicRouterDecision,
+          resourceFirst: true,
+        },
+        response: resourceFirstResponse,
+      });
+    }
+
     const { plannerDecision, error: plannerError } = await runIntentPlanner({
       trace,
       req,
@@ -7011,9 +7296,11 @@ const handleChatMessage = async (req, res) => {
       mode: routerDecision.plannerDecision?.mode || plannerDecision?.mode || null,
       selectedCase: routerDecision.case,
       needsResourceSearch: routerDecision.needsResourceSearch,
-      resourceSearchQuery: routerDecision.plannerDecision?.resourceSearchQuery || routerDecision.resourceHint || null,
+      resourceSearchQueryLength: String(
+        routerDecision.plannerDecision?.resourceSearchQuery || routerDecision.resourceHint || '',
+      ).length,
       needsActionFlow: routerDecision.needsActionFlow,
-      reason: routerDecision.reason,
+      reasonLength: String(routerDecision.reason || '').length,
     });
     logArchitecture('router_decision', {
       requestId: trace.requestId,
@@ -7200,7 +7487,7 @@ const handleChatMessageWithFiles = async (req, res) => {
         console.log('[chat/with-files] AI agentMode:', ai.agentMode);
         console.log('[chat/with-files] AI intent:', ai.intent);
         console.log('[chat/with-files] AI actionName:', ai.actionName);
-        console.log('[chat/with-files] AI assistantMessage:', ai.assistantMessage);
+        console.log('[chat/with-files] AI assistantMessagePreview:', messagePreview(ai.assistantMessage, 120));
 
         if (fileContext.hasUploadedFiles && ai.assistantMessage) {
           const lower = ai.assistantMessage.toLowerCase();

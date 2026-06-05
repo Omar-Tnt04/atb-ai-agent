@@ -6,6 +6,7 @@ from typing import Any
 import fitz
 
 from app.config import settings
+from app.config.model_routing import select_model
 from app.schemas.agent import VisionDocumentAnalyzeRequest
 from app.services.ollama_service import (
     OllamaServiceError,
@@ -1264,6 +1265,20 @@ def analyze_vision_document(request: VisionDocumentAnalyzeRequest) -> dict[str, 
         _log_vision("disabled")
         raise VisionDocumentError("Vision PDF analysis is disabled", 503)
 
+    routing = select_model(requires_vision=True)
+    if not routing.direct_vision_supported:
+        _log_vision(
+            "unsupported_by_model_routing",
+            model_routing_mode=routing.model_routing_mode,
+            selected_model=routing.selected_model,
+            selected_model_reason=routing.selected_model_reason,
+            vision_used=str(routing.vision_used).lower(),
+        )
+        raise VisionDocumentError(
+            "Direct vision analysis is unsupported when MODEL_ROUTING_MODE=text_only",
+            503,
+        )
+
     _log_vision(
         "request_received",
         source=request.source,
@@ -1271,7 +1286,11 @@ def analyze_vision_document(request: VisionDocumentAnalyzeRequest) -> dict[str, 
         pdf_base64_length=len(request.pdfBase64 or ""),
         page_numbers=",".join(str(page) for page in (request.pageNumbers or [])) or "default",
         detail_mode=str(bool(request.detailMode)).lower(),
-        model=settings.OLLAMA_MODEL,
+        model=routing.selected_model,
+        model_routing_mode=routing.model_routing_mode,
+        selected_model=routing.selected_model,
+        selected_model_reason=routing.selected_model_reason,
+        vision_used=str(routing.vision_used).lower(),
     )
     user_goal = _detect_user_goal(request)
     expected_document_type = _infer_requested_document_type(request) or "unknown"
@@ -1309,7 +1328,11 @@ def analyze_vision_document(request: VisionDocumentAnalyzeRequest) -> dict[str, 
         "ollama_payload_ready",
         image_count=len(images),
         selected_pages=",".join(str(page) for page in selected_page_numbers),
-        model=settings.OLLAMA_MODEL,
+        model=routing.selected_model,
+        model_routing_mode=routing.model_routing_mode,
+        selected_model=routing.selected_model,
+        selected_model_reason=routing.selected_model_reason,
+        vision_used=str(routing.vision_used).lower(),
     )
 
     if request.detailMode:

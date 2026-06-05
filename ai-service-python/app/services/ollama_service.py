@@ -5,6 +5,7 @@ from typing import Any
 import requests
 
 from app.config import settings
+from app.config.model_routing import ModelSelection, select_model
 from app.prompts.ai_decision_prompt import build_ai_decision_prompt
 from app.prompts.banking_intent_prompt import build_banking_intent_prompt
 from app.prompts.intent_planner_prompt import build_intent_planner_prompt
@@ -25,9 +26,8 @@ class OllamaJsonParseError(OllamaServiceError):
         self.is_json_parse_error = True
 
 
-VISION_MODEL = settings.OLLAMA_MODEL
 VISION_ENDPOINT = "/api/generate"
-LOG_PREVIEW_LIMIT = 500
+LOG_PREVIEW_LIMIT = 120
 OLLAMA_TIMING_FIELDS = (
     "total_duration",
     "load_duration",
@@ -43,11 +43,21 @@ def _log_ollama(event: str, **fields: Any) -> None:
     print(f"[ollama] {event}{(' ' + details) if details else ''}", flush=True)
 
 
-def _ollama_runtime_fields() -> dict[str, Any]:
+def _routing_log_fields(selection: ModelSelection) -> dict[str, Any]:
     return {
-        "model": settings.OLLAMA_MODEL,
-        "keep_alive": settings.OLLAMA_KEEP_ALIVE,
+        "model_routing_mode": selection.model_routing_mode,
+        "selected_model": selection.selected_model,
+        "selected_model_reason": selection.selected_model_reason,
+        "vision_used": str(selection.vision_used).lower(),
+    }
+
+
+def _ollama_runtime_fields(selection: ModelSelection) -> dict[str, Any]:
+    return {
+        "model": selection.selected_model,
+        "keep_alive": selection.selected_keep_alive,
         "unloadAfterResponse": str(settings.OLLAMA_UNLOAD_AFTER_RESPONSE).lower(),
+        **_routing_log_fields(selection),
     }
 
 
@@ -62,21 +72,21 @@ def _ollama_timing_fields(payload: Any) -> dict[str, Any]:
     }
 
 
-def _build_generate_payload(payload: dict[str, Any]) -> dict[str, Any]:
+def _build_generate_payload(payload: dict[str, Any], selection: ModelSelection) -> dict[str, Any]:
     return {
         **payload,
-        "model": settings.OLLAMA_MODEL,
-        "keep_alive": settings.OLLAMA_KEEP_ALIVE,
+        "model": selection.selected_model,
+        "keep_alive": selection.selected_keep_alive,
     }
 
 
-def _unload_ollama_model(request_kind: str) -> None:
+def _unload_ollama_model(request_kind: str, selection: ModelSelection) -> None:
     if not settings.OLLAMA_UNLOAD_AFTER_RESPONSE:
         return
 
     response: requests.Response | None = None
     unload_payload = {
-        "model": settings.OLLAMA_MODEL,
+        "model": selection.selected_model,
         "prompt": "",
         "stream": False,
         "keep_alive": 0,
@@ -87,9 +97,10 @@ def _unload_ollama_model(request_kind: str) -> None:
             "unload_request",
             request_kind=request_kind,
             endpoint=VISION_ENDPOINT,
-            model=settings.OLLAMA_MODEL,
+            model=selection.selected_model,
             keep_alive=0,
             unloadAfterResponse="true",
+            **_routing_log_fields(selection),
         )
         response = requests.post(
             f"{settings.OLLAMA_BASE_URL}{VISION_ENDPOINT}",
@@ -106,9 +117,10 @@ def _unload_ollama_model(request_kind: str) -> None:
             "unload_response",
             request_kind=request_kind,
             endpoint=VISION_ENDPOINT,
-            model=settings.OLLAMA_MODEL,
+            model=selection.selected_model,
             keep_alive=0,
             status_code=status_code,
+            **_routing_log_fields(selection),
             **_ollama_timing_fields(payload),
         )
         response.raise_for_status()
@@ -118,11 +130,12 @@ def _unload_ollama_model(request_kind: str) -> None:
             "unload_failed",
             request_kind=request_kind,
             endpoint=VISION_ENDPOINT,
-            model=settings.OLLAMA_MODEL,
+            model=selection.selected_model,
             keep_alive=0,
             status_code=getattr(failed_response, "status_code", "none"),
             exception_type=exc.__class__.__name__,
             exception=_preview_text(exc),
+            **_routing_log_fields(selection),
         )
 
 
@@ -133,7 +146,12 @@ def _post_generate_json(
     timeout: int,
     log_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    request_payload = _build_generate_payload(payload)
+    requires_vision = request_kind == "vision"
+    selection = select_model(requires_vision=requires_vision)
+    if requires_vision and not selection.direct_vision_supported:
+        raise OllamaServiceError("Direct vision is unsupported when MODEL_ROUTING_MODE=text_only")
+
+    request_payload = _build_generate_payload(payload, selection)
     fields = log_fields or {}
     response: requests.Response | None = None
     timer = startTimer(request_kind)
@@ -144,16 +162,17 @@ def _post_generate_json(
             "threadId": fields.get("threadId"),
             "requestKind": request_kind,
             "endpoint": VISION_ENDPOINT,
-            "model": settings.OLLAMA_MODEL,
-            "mode": "vision" if request_kind == "vision" else "text",
+            "model": selection.selected_model,
+            "mode": "vision" if selection.vision_used else "text",
             "promptType": request_kind,
             "imageCount": fields.get("image_count"),
             "selectedPages": fields.get("selected_pages"),
+            **_routing_log_fields(selection),
         })
         _log_ollama(
             f"{request_kind}_request",
             endpoint=VISION_ENDPOINT,
-            **_ollama_runtime_fields(),
+            **_ollama_runtime_fields(selection),
             **fields,
         )
         response = requests.post(
@@ -165,7 +184,7 @@ def _post_generate_json(
             f"{request_kind}_response",
             endpoint=VISION_ENDPOINT,
             status_code=response.status_code,
-            **_ollama_runtime_fields(),
+            **_ollama_runtime_fields(selection),
             **fields,
         )
         response.raise_for_status()
@@ -173,7 +192,7 @@ def _post_generate_json(
         _log_ollama(
             f"{request_kind}_timing",
             endpoint=VISION_ENDPOINT,
-            **_ollama_runtime_fields(),
+            **_ollama_runtime_fields(selection),
             **fields,
             **_ollama_timing_fields(response_payload),
         )
@@ -182,11 +201,12 @@ def _post_generate_json(
             "threadId": fields.get("threadId"),
             "requestKind": request_kind,
             "endpoint": VISION_ENDPOINT,
-            "model": settings.OLLAMA_MODEL,
-            "mode": "vision" if request_kind == "vision" else "text",
+            "model": selection.selected_model,
+            "mode": "vision" if selection.vision_used else "text",
             "latencyMs": endTimer(timer),
             "statusCode": response.status_code,
             "parsing": "success",
+            **_routing_log_fields(selection),
             **_ollama_timing_fields(response_payload),
         })
         return response_payload
@@ -199,7 +219,7 @@ def _post_generate_json(
             exception_type=exc.__class__.__name__,
             exception=_preview_text(exc),
             response_preview=_preview_text(getattr(failed_response, "text", "")),
-            **_ollama_runtime_fields(),
+            **_ollama_runtime_fields(selection),
             **fields,
         )
         logError("ollama_call_failed", exc, {
@@ -207,9 +227,10 @@ def _post_generate_json(
             "threadId": fields.get("threadId"),
             "requestKind": request_kind,
             "endpoint": VISION_ENDPOINT,
-            "model": settings.OLLAMA_MODEL,
+            "model": selection.selected_model,
             "latencyMs": endTimer(timer),
             "parsing": "failure",
+            **_routing_log_fields(selection),
         })
         raise
     except ValueError as exc:
@@ -220,7 +241,7 @@ def _post_generate_json(
             exception_type=exc.__class__.__name__,
             exception=_preview_text(exc),
             response_preview=_preview_text(getattr(response, "text", "")),
-            **_ollama_runtime_fields(),
+            **_ollama_runtime_fields(selection),
             **fields,
         )
         logError("ollama_json_parse_failed", exc, {
@@ -228,14 +249,15 @@ def _post_generate_json(
             "threadId": fields.get("threadId"),
             "requestKind": request_kind,
             "endpoint": VISION_ENDPOINT,
-            "model": settings.OLLAMA_MODEL,
+            "model": selection.selected_model,
             "latencyMs": endTimer(timer),
             "parsing": "failure",
+            **_routing_log_fields(selection),
         })
         raise
     finally:
         if response is not None:
-            _unload_ollama_model(request_kind)
+            _unload_ollama_model(request_kind, selection)
 
 
 def _preview_text(value: Any, limit: int = LOG_PREVIEW_LIMIT) -> str:
@@ -377,6 +399,15 @@ def _payload_keys(payload: Any) -> str:
     return ",".join(sorted(str(key) for key in payload.keys()))
 
 
+def _max_predict(default: int) -> int:
+    configured = getattr(settings, "MAX_AI_RESPONSE_TOKENS", default)
+    try:
+        configured = int(configured)
+    except (TypeError, ValueError):
+        configured = default
+    return max(1, min(default, configured))
+
+
 def _extract_ollama_text(payload: Any) -> tuple[str | None, str]:
     if not isinstance(payload, dict):
         return None, "none"
@@ -461,7 +492,7 @@ def analyze_with_ollama(request: AgentAnalyzeRequest) -> dict[str, Any]:
                 "format": "json",
                 "options": {
                     "temperature": 0,
-                    "num_predict": 300,
+                    "num_predict": _max_predict(300),
                 },
             },
             timeout=20,
@@ -495,7 +526,7 @@ def decide_with_ollama(request: AgentAnalyzeRequest) -> dict[str, Any]:
                 "format": "json",
                 "options": {
                     "temperature": 0,
-                    "num_predict": 450,
+                    "num_predict": _max_predict(450),
                 },
             },
             timeout=20,
@@ -529,7 +560,7 @@ def plan_intent_with_ollama(request: AgentAnalyzeRequest) -> dict[str, Any]:
                 "format": "json",
                 "options": {
                     "temperature": 0,
-                    "num_predict": 350,
+                    "num_predict": _max_predict(350),
                 },
             },
             timeout=20,
@@ -551,7 +582,7 @@ def plan_intent_with_ollama(request: AgentAnalyzeRequest) -> dict[str, Any]:
     logArchitecture("planner_raw_output_preview", {
         "requestId": request.requestId,
         "threadId": request.threadId,
-        "preview": _preview_text(response_text, limit=500),
+        "preview": _preview_text(response_text),
     })
 
     try:
@@ -560,7 +591,7 @@ def plan_intent_with_ollama(request: AgentAnalyzeRequest) -> dict[str, Any]:
         logArchitecture("planner_json_extract_failed", {
             "requestId": request.requestId,
             "threadId": request.threadId,
-            "planner_raw_output_preview": _preview_text(response_text, limit=500),
+            "planner_raw_output_preview": _preview_text(response_text),
             "error": str(exc),
         }, level="warning")
         raise
@@ -581,6 +612,7 @@ def _request_vision_generate(
     log_context: dict[str, Any] | None = None,
 ) -> str:
     context = log_context or {}
+    selection = select_model(requires_vision=True)
     try:
         payload = _post_generate_json(
             "vision",
@@ -591,7 +623,7 @@ def _request_vision_generate(
                 "think": False,
                 "options": {
                     "temperature": 0.2,
-                    "num_predict": 1800,
+                    "num_predict": _max_predict(1800),
                 },
             },
             timeout=180,
@@ -611,12 +643,13 @@ def _request_vision_generate(
             "vision_unavailable",
             attempt=attempt,
             attempt_number=attempt_number,
-            model=VISION_MODEL,
+            model=selection.selected_model,
             image_count=len(images),
             endpoint=VISION_ENDPOINT,
             prompt_length=len(prompt or ""),
             exception_type=exc.__class__.__name__,
             exception=_preview_text(exc),
+            **_routing_log_fields(selection),
         )
         raise OllamaServiceError("Ollama vision model is unavailable") from exc
     except ValueError as exc:
@@ -628,13 +661,14 @@ def _request_vision_generate(
         "vision_payload",
         attempt=attempt,
         attempt_number=attempt_number,
-        model=VISION_MODEL,
+        model=selection.selected_model,
         endpoint=VISION_ENDPOINT,
         content_field=content_field,
         content_length=len(response_text or ""),
         thinking_length=len(thinking_text or ""),
         response_keys=_payload_keys(payload),
-        content_preview=_preview_text(response_text, limit=300),
+        content_preview=_preview_text(response_text),
+        **_routing_log_fields(selection),
     )
 
     if not isinstance(response_text, str) or not _strip_thinking_blocks(response_text):
@@ -642,13 +676,14 @@ def _request_vision_generate(
             "vision_empty_response",
             attempt=attempt,
             attempt_number=attempt_number,
-            model=VISION_MODEL,
+            model=selection.selected_model,
             endpoint=VISION_ENDPOINT,
             image_count=len(images),
             prompt_length=len(prompt or ""),
             status_code="unknown",
             response_keys=_payload_keys(payload),
             content_field=content_field,
+            **_routing_log_fields(selection),
         )
         raise OllamaServiceError("empty_ollama_response")
 

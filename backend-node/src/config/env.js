@@ -1,6 +1,7 @@
 require('dotenv').config();
 
 const trimTrailingSlash = (value) => String(value || '').replace(/\/+$/, '');
+const { modelRoutingConfig } = require('./modelRouting');
 
 const numberEnv = (name, fallback) => {
   const value = Number(process.env[name]);
@@ -18,7 +19,13 @@ const env = {
   jwtSecret: process.env.JWT_SECRET || 'replace_with_secret',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1d',
   aiServiceUrl: process.env.AI_SERVICE_URL || 'http://localhost:8000',
+  modelRouting: modelRoutingConfig,
+  maxContextChars: numberEnv('MAX_CONTEXT_CHARS', 4000),
+  maxAiResponseTokens: numberEnv('MAX_AI_RESPONSE_TOKENS', 500),
   enableVisionPdfAnalysis: process.env.ENABLE_VISION_PDF_ANALYSIS !== 'false',
+  enableVisionSummaryCache: process.env.ENABLE_VISION_SUMMARY_CACHE === 'true',
+  visionSummaryCacheMaxItems: numberEnv('VISION_SUMMARY_CACHE_MAX_ITEMS', 20),
+  visionSummaryCacheTtlMs: numberEnv('VISION_SUMMARY_CACHE_TTL_MS', 300000),
   architectureLogsEnabled: process.env.ARCHITECTURE_LOGS_ENABLED !== 'false',
   logLevel: process.env.LOG_LEVEL || 'debug',
   logDir: process.env.LOG_DIR || '../logs',

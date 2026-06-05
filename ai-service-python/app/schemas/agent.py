@@ -63,6 +63,14 @@ class AgentContext(BaseModel):
     resourceResponseWriter: dict[str, Any] | None = None
 
 
+class ModelRoutingContext(BaseModel):
+    modelRoutingMode: str | None = None
+    selectedModel: str | None = None
+    selectedKeepAlive: str | None = None
+    selectedModelReason: str | None = None
+    visionUsed: bool | None = None
+
+
 class AgentAnalyzeRequest(BaseModel):
     requestId: str | None = None
     threadId: str | None = None
@@ -74,6 +82,7 @@ class AgentAnalyzeRequest(BaseModel):
     resolvedResourceContext: ResolvedResourceContext | None = None
     profileContext: ProfileContext | None = None
     agentContext: AgentContext | None = None
+    modelRouting: ModelRoutingContext | None = None
 
 
 class VisionDocumentAnalyzeRequest(BaseModel):
@@ -92,6 +101,7 @@ class VisionDocumentAnalyzeRequest(BaseModel):
     maxPages: int | None = None
     pageNumbers: list[int] | None = None
     detailMode: bool | None = False
+    modelRouting: ModelRoutingContext | None = None
 
 
 class AgentAnalyzeData(BaseModel):

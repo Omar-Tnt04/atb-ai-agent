@@ -2,7 +2,6 @@ import json
 import os
 import re
 import time
-import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -12,9 +11,24 @@ from app.config import settings
 
 SENSITIVE_KEY_PATTERN = re.compile(
     r"(password|passwd|token|jwt|authorization|secret|sms|otp|code|rib|iban|"
-    r"accountnumber|account_number|cardnumber|card_number|pdfbase64|imagebase64|base64|prompt|privatecontext)",
+    r"accountnumber|account_number|cardnumber|card_number|pdfbase64|imagebase64|base64|prompt|"
+    r"privatecontext|filetext|fulltext|rawoutput|rawresponse|responsebody)",
     re.IGNORECASE,
 )
+
+LARGE_CONTEXT_KEY_PATTERN = re.compile(
+    r"(resourcejson|resourcecontext|resolvedresourcecontext|matchedresource|matchedresources|"
+    r"resources|filecontext|conversationhistory|privatecontext)",
+    re.IGNORECASE,
+)
+
+TEXT_LENGTH_ONLY_KEY_PATTERN = re.compile(
+    r"(message|query|goal|reason|assistant|response)(?!_?preview)",
+    re.IGNORECASE,
+)
+
+MAX_STRING_LENGTH = 160
+MAX_PREVIEW_LENGTH = 120
 
 
 def _log_dir() -> Path:
@@ -34,7 +48,7 @@ def _enabled() -> bool:
     return bool(settings.ARCHITECTURE_LOGS_ENABLED)
 
 
-def _truncate(value: Any, limit: int = 240) -> str:
+def _truncate(value: Any, limit: int = MAX_STRING_LENGTH) -> str:
     text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
     text = re.sub(r"\s+", " ", text)
     return f"{text[:limit]}..." if len(text) > limit else text
@@ -47,9 +61,33 @@ def _mask_identifier(value: Any) -> str:
     return f"{'*' * min(8, max(4, len(text) - 4))}{text[-4:]}"
 
 
+def _compact_object_summary(payload: Any) -> Any:
+    if not isinstance(payload, (dict, list)):
+        return payload
+    if isinstance(payload, list):
+        return {
+            "itemCount": len(payload),
+            "itemTypes": [type(item).__name__ for item in payload[:5]],
+        }
+
+    return {
+        "keys": list(payload.keys())[:20],
+        "title": payload.get("title") or payload.get("name") or payload.get("fileName"),
+        "resourceId": payload.get("resourceId") or payload.get("id"),
+        "resourceType": payload.get("resourceType") or payload.get("type"),
+        "contentType": payload.get("contentType") or payload.get("mimeType"),
+        "extractionStatus": payload.get("extractionStatus"),
+        "fileSize": payload.get("fileSize") or payload.get("size"),
+        "hasPdfPayload": bool(payload.get("pdfBase64")),
+        "hasFileText": bool(payload.get("fileText")),
+    }
+
+
 def maskLogPayload(payload: Any, key: str = "") -> Any:
     if payload is None:
         return None
+    if LARGE_CONTEXT_KEY_PATTERN.search(str(key or "")):
+        return _compact_object_summary(payload)
     if isinstance(payload, list):
         return [maskLogPayload(item, key) for item in payload[:12]]
     if isinstance(payload, dict):
@@ -63,6 +101,8 @@ def maskLogPayload(payload: Any, key: str = "") -> Any:
         return "[redacted]"
 
     text = str(payload)
+    if TEXT_LENGTH_ONLY_KEY_PATTERN.search(str(key or "")):
+        return f"[text length={len(text)}]"
     if re.match(r"^Bearer\s+", text, re.IGNORECASE):
         return "[redacted bearer token]"
     if re.match(r"^[A-Za-z0-9+/=]{500,}$", text):
@@ -110,7 +150,6 @@ def logError(eventName: str, error: Exception, payload: dict[str, Any] | None = 
         **(payload or {}),
         "errorType": error.__class__.__name__,
         "errorMessage": str(error),
-        "stack": traceback.format_exc(),
     }
     logArchitecture(eventName, data, level="error")
     _write(ERRORS_LOG, json.dumps({
@@ -129,5 +168,5 @@ def endTimer(started_at: float) -> int:
     return max(0, round((time.perf_counter() - started_at) * 1000))
 
 
-def message_preview(value: Any, limit: int = 120) -> str:
-    return _truncate(value, limit)
+def message_preview(value: Any, limit: int = MAX_PREVIEW_LENGTH) -> str:
+    return f"[text length={len(str(value or ''))}]"

@@ -14,6 +14,7 @@ const {
   MAX_THREAD_MESSAGES,
   buildResourceHistoryEntry,
   getAgentMemory,
+  getPdfVisionCache,
   resetAgentMemoryForTests,
   sanitizeResourceMetadata,
   setPdfVisionCache,
@@ -47,6 +48,11 @@ const {
   isGenericCapabilitiesResponse,
   isMetadataAnswerLikelyEnough,
 } = require('../src/services/resourceAnswer.service');
+const {
+  normalizeRoutingMode,
+  selectModel,
+  selectModelForConfig,
+} = require('../src/config/modelRouting');
 
 const memoryWithPersonalLoan = {
   recentMessages: [],
@@ -1214,6 +1220,58 @@ const runImageResourceNoMatchRegressionTests = async () => {
   assert.strictEqual(matches.length, 0);
 };
 
+const runModelRoutingConfigTests = () => {
+  assert.strictEqual(normalizeRoutingMode('hybrid'), 'hybrid');
+  assert.strictEqual(normalizeRoutingMode('text_only'), 'text_only');
+  assert.strictEqual(normalizeRoutingMode('vision_only'), 'vision_only');
+  assert.strictEqual(normalizeRoutingMode('invalid'), 'hybrid');
+
+  const textSelection = selectModel({ requiresVision: false });
+  assert.strictEqual(textSelection.modelRoutingMode, env.modelRouting.mode);
+  assert.strictEqual(textSelection.selectedModel, env.modelRouting.textModel);
+  assert.strictEqual(textSelection.selectedKeepAlive, env.modelRouting.textKeepAlive);
+  assert.strictEqual(textSelection.visionUsed, false);
+  assert(textSelection.selectedModelReason.includes('text model'));
+
+  const visionSelection = selectModel({ requiresVision: true });
+  assert.strictEqual(visionSelection.modelRoutingMode, env.modelRouting.mode);
+  if (env.modelRouting.mode === 'text_only') {
+    assert.strictEqual(visionSelection.selectedModel, env.modelRouting.textModel);
+    assert.strictEqual(visionSelection.visionUsed, false);
+    assert.strictEqual(visionSelection.directVisionSupported, false);
+    assert(visionSelection.selectedModelReason.includes('unsupported'));
+  } else {
+    assert.strictEqual(visionSelection.selectedModel, env.modelRouting.visionModel);
+    assert.strictEqual(visionSelection.selectedKeepAlive, env.modelRouting.visionKeepAlive);
+    assert.strictEqual(visionSelection.visionUsed, true);
+    assert.strictEqual(visionSelection.directVisionSupported, true);
+  }
+
+  const baseConfig = {
+    textModel: 'qwen2.5:7b',
+    visionModel: 'qwen3-vl:8b',
+    textKeepAlive: '30s',
+    visionKeepAlive: '0s',
+  };
+
+  const hybridText = selectModelForConfig({ ...baseConfig, mode: 'hybrid' }, { requiresVision: false });
+  assert.strictEqual(hybridText.selectedModel, 'qwen2.5:7b');
+  assert.strictEqual(hybridText.visionUsed, false);
+
+  const hybridVision = selectModelForConfig({ ...baseConfig, mode: 'hybrid' }, { requiresVision: true });
+  assert.strictEqual(hybridVision.selectedModel, 'qwen3-vl:8b');
+  assert.strictEqual(hybridVision.visionUsed, true);
+
+  const textOnlyVision = selectModelForConfig({ ...baseConfig, mode: 'text_only' }, { requiresVision: true });
+  assert.strictEqual(textOnlyVision.selectedModel, 'qwen2.5:7b');
+  assert.strictEqual(textOnlyVision.visionUsed, false);
+  assert.strictEqual(textOnlyVision.directVisionSupported, false);
+
+  const visionOnlyText = selectModelForConfig({ ...baseConfig, mode: 'vision_only' }, { requiresVision: false });
+  assert.strictEqual(visionOnlyText.selectedModel, 'qwen3-vl:8b');
+  assert.strictEqual(visionOnlyText.visionUsed, false);
+};
+
 const runVagueMemoryFollowupTests = () => {
   resetAgentMemoryForTests();
   updateAgentMemory({
@@ -1416,25 +1474,86 @@ const runMemoryTests = () => {
   assert.strictEqual(safeCardResource.availableLimit, '1735.250 TND');
   assert.strictEqual(safeCardResource.currentLimit, '2500.000 TND');
 
-  const cached = setPdfVisionCache({
-    resourceId: 'personal-loan',
-    pdfUrl: 'http://localhost/resources/personal-loan.pdf',
-    visionResult: {
-      data: {
-        ai: {
-          assistantMessage: 'Fees are listed on page 2.',
-          confidence: 0.9,
-          extractedFields: {
-            page: 2,
-            evidence_text: 'Fees are listed.',
-            accountNumber: '1234567890123456',
+  const originalCacheEnabled = process.env.ENABLE_VISION_SUMMARY_CACHE;
+  const originalCacheMaxItems = process.env.VISION_SUMMARY_CACHE_MAX_ITEMS;
+  const originalCacheTtlMs = process.env.VISION_SUMMARY_CACHE_TTL_MS;
+  const restoreCacheEnv = () => {
+    if (originalCacheEnabled === undefined) {
+      delete process.env.ENABLE_VISION_SUMMARY_CACHE;
+    } else {
+      process.env.ENABLE_VISION_SUMMARY_CACHE = originalCacheEnabled;
+    }
+    if (originalCacheMaxItems === undefined) {
+      delete process.env.VISION_SUMMARY_CACHE_MAX_ITEMS;
+    } else {
+      process.env.VISION_SUMMARY_CACHE_MAX_ITEMS = originalCacheMaxItems;
+    }
+    if (originalCacheTtlMs === undefined) {
+      delete process.env.VISION_SUMMARY_CACHE_TTL_MS;
+    } else {
+      process.env.VISION_SUMMARY_CACHE_TTL_MS = originalCacheTtlMs;
+    }
+  };
+
+  try {
+    resetAgentMemoryForTests();
+    delete process.env.ENABLE_VISION_SUMMARY_CACHE;
+    assert.strictEqual(setPdfVisionCache({
+      resourceId: 'personal-loan',
+      pdfUrl: 'http://localhost/resources/personal-loan.pdf',
+      visionResult: { data: { ai: { assistantMessage: 'Fees are listed on page 2.' } } },
+    }), null);
+    assert.strictEqual(getPdfVisionCache({
+      resourceId: 'personal-loan',
+      pdfUrl: 'http://localhost/resources/personal-loan.pdf',
+    }), null);
+
+    process.env.ENABLE_VISION_SUMMARY_CACHE = 'true';
+    process.env.VISION_SUMMARY_CACHE_MAX_ITEMS = '1';
+    process.env.VISION_SUMMARY_CACHE_TTL_MS = '300000';
+    const cached = setPdfVisionCache({
+      resourceId: 'personal-loan',
+      pdfUrl: 'http://localhost/resources/personal-loan.pdf',
+      visionResult: {
+        data: {
+          ai: {
+            assistantMessage: 'Fees are listed on page 2.',
+            confidence: 0.9,
+            extractedFields: {
+              page: 2,
+              evidence_text: 'Fees are listed.',
+              accountNumber: '1234567890123456',
+            },
           },
         },
       },
-    },
-  });
-  assert.strictEqual(cached.confidence, 0.9);
-  assert.strictEqual(cached.extractedFields.accountNumber, undefined);
+    });
+    assert.strictEqual(cached.confidence, 0.9);
+    assert.strictEqual(cached.extractedFields.accountNumber, undefined);
+
+    setPdfVisionCache({
+      resourceId: 'credit-card-limit',
+      pdfUrl: 'http://localhost/resources/credit-card-limit.pdf',
+      visionResult: { data: { ai: { assistantMessage: 'Credit card limit summary.' } } },
+    });
+    assert.strictEqual(getPdfVisionCache({
+      resourceId: 'personal-loan',
+      pdfUrl: 'http://localhost/resources/personal-loan.pdf',
+    }), null);
+    assert(getPdfVisionCache({
+      resourceId: 'credit-card-limit',
+      pdfUrl: 'http://localhost/resources/credit-card-limit.pdf',
+    }));
+
+    process.env.VISION_SUMMARY_CACHE_TTL_MS = '0';
+    assert.strictEqual(getPdfVisionCache({
+      resourceId: 'credit-card-limit',
+      pdfUrl: 'http://localhost/resources/credit-card-limit.pdf',
+    }), null);
+  } finally {
+    restoreCacheEnv();
+    resetAgentMemoryForTests();
+  }
 };
 
 const runPromptInjectionGuardTests = () => {
@@ -1450,6 +1569,7 @@ const runPromptInjectionGuardTests = () => {
 };
 
 const runAllTests = async () => {
+  runModelRoutingConfigTests();
   runRouterCaseTests();
   runGeneralNaturalChatRoutingTests();
   runActiveResourceFollowupGateTests();

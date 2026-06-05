@@ -4,9 +4,16 @@ const { performance } = require('perf_hooks');
 const env = require('../config/env');
 
 const SENSITIVE_KEY_PATTERN =
-  /(password|passwd|token|jwt|authorization|secret|sms|otp|code|rib|iban|accountnumber|account_number|cardnumber|card_number|pdfbase64|imagebase64|base64|prompt|privatecontext)/i;
+  /(password|passwd|token|jwt|authorization|secret|sms|otp|code|rib|iban|accountnumber|account_number|cardnumber|card_number|pdfbase64|imagebase64|base64|prompt|privatecontext|filetext|fulltext|rawoutput|rawresponse|responsebody)/i;
 
-const MAX_STRING_LENGTH = 240;
+const LARGE_CONTEXT_KEY_PATTERN =
+  /(resourcejson|resourcecontext|resolvedresourcecontext|matchedresource|matchedresources|resources|filecontext|conversationhistory|privatecontext)/i;
+
+const TEXT_LENGTH_ONLY_KEY_PATTERN =
+  /(message|query|goal|reason|assistant|response)(?!_?preview)/i;
+
+const MAX_STRING_LENGTH = 160;
+const MAX_PREVIEW_LENGTH = 120;
 
 const ensureLogDir = () => {
   if (!env.architectureLogsEnabled) return null;
@@ -36,6 +43,10 @@ const maskScalar = (key, value) => {
     return '[redacted]';
   }
 
+  if (TEXT_LENGTH_ONLY_KEY_PATTERN.test(keyText)) {
+    return `[text length=${text.length}]`;
+  }
+
   if (/^Bearer\s+/i.test(text)) return '[redacted bearer token]';
   if (/data:image\/[^;]+;base64,/i.test(text)) return '[image base64 redacted]';
   if (/^[A-Za-z0-9+/=]{500,}$/.test(text)) return `[large base64-like value length=${text.length}]`;
@@ -50,8 +61,34 @@ const maskIdentifier = (value) => {
   return `${'*'.repeat(Math.min(8, Math.max(4, compact.length - 4)))}${compact.slice(-4)}`;
 };
 
+const compactObjectSummary = (payload) => {
+  if (!payload || typeof payload !== 'object') return payload;
+  if (Array.isArray(payload)) {
+    return {
+      itemCount: payload.length,
+      itemTypes: payload.slice(0, 5).map((item) => typeof item),
+    };
+  }
+
+  return {
+    keys: Object.keys(payload).slice(0, 20),
+    title: payload.title || payload.name || payload.fileName || null,
+    resourceId: payload.resourceId || payload.id || null,
+    resourceType: payload.resourceType || payload.type || null,
+    contentType: payload.contentType || payload.mimeType || null,
+    extractionStatus: payload.extractionStatus || null,
+    fileSize: payload.fileSize || payload.size || null,
+    hasPdfPayload: Boolean(payload.pdfBase64),
+    hasFileText: Boolean(payload.fileText),
+  };
+};
+
 const maskLogPayload = (payload, key = '') => {
   if (payload === null || payload === undefined) return payload;
+
+  if (LARGE_CONTEXT_KEY_PATTERN.test(String(key || ''))) {
+    return compactObjectSummary(payload);
+  }
 
   if (Array.isArray(payload)) {
     return payload.slice(0, 12).map((item) => maskLogPayload(item, key));
@@ -117,7 +154,6 @@ const logError = (stage, error, payload = {}) => {
     ...payload,
     errorName: error?.name,
     errorMessage: error?.message,
-    stack: error?.stack,
   };
   logArchitecture(stage, errorPayload, { level: 'error', message: 'error' });
   if (env.architectureLogsEnabled) {
@@ -135,7 +171,7 @@ const startTimer = () => performance.now();
 const endTimer = (startedAt) =>
   Number.isFinite(startedAt) ? Math.max(0, Math.round(performance.now() - startedAt)) : null;
 
-const messagePreview = (message = '', limit = 120) => truncate(message, limit);
+const messagePreview = (message = '') => `[text length=${String(message || '').length}]`;
 
 module.exports = {
   endTimer,
