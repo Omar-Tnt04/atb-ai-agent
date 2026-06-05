@@ -16,6 +16,11 @@ INTENT_KEYWORDS = {
         "solde",
         "رصيد",
         "account amount",
+        "account details",
+        "account information",
+        "account info",
+        "show my account",
+        "show my accounts",
         "how much",
     ],
     "view_transactions": [
@@ -54,9 +59,7 @@ INTENT_KEYWORDS = {
     "book_appointment": [
         "appointment",
         "meeting",
-        "branch",
         "rendez-vous",
-        "agence",
         "موعد",
     ],
     "pay_bill": [
@@ -464,6 +467,7 @@ def _is_resource_analysis_request(request: AgentAnalyzeRequest) -> bool:
     normalized_message = request.message.lower()
     explicit_action_patterns = [
         r"\bpay\s+(?:this\s+|the\s+|my\s+)?bill\b",
+        r"\bpay\b.{0,40}\b(?:bill|invoice)\b",
         r"\bsettle\s+(?:this\s+|the\s+|my\s+)?bill\b",
         r"\bmake\s+(?:a\s+)?transfer\b",
         r"\bprepare\s+(?:the\s+)?transfer\b",
@@ -834,10 +838,65 @@ def _has_any(text: str, patterns: list[str]) -> bool:
     return any(pattern in text for pattern in patterns)
 
 
+def _is_capabilities_question(message: str) -> bool:
+    text = re.sub(r"\s+", " ", str(message or "").lower()).strip()
+    return bool(
+        re.fullmatch(r"(help|services|hello help|hi help|hey help)", text)
+        or re.search(r"\bwhat\s+can\s+you\s+do\b", text)
+        or re.search(r"\bwhat\s+do\s+you\s+do\b", text)
+        or re.search(r"\bhow\s+can\s+you\s+help\b", text)
+        or re.search(r"\bhow\s+can\s+you\s+assist\b", text)
+        or re.search(r"\bwhat\s+can\s+you\s+help\s+(?:me\s+)?with\b", text)
+        or re.search(r"\bshow\s+me\s+your\s+(?:capabilities|services)\b", text)
+    )
+
+
 def _matches_any(text: str, patterns: list[str]) -> bool:
     import re
 
     return any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns)
+
+
+def _is_account_details_request(message: str) -> bool:
+    normalized_message = message.lower()
+    return _matches_any(
+        normalized_message,
+        [
+            r"\baccounts?\b.*\b(details?|information|info|summary|status)\b",
+            r"\b(details?|information|info|summary|status)\b.*\baccounts?\b",
+            r"\b(show|view|give|get|display|list)\b.*\bmy\s+accounts?\b",
+            r"\b(show|view|give|get|display|list)\b.*\baccounts?\b",
+        ],
+    )
+
+
+def _is_appointment_booking_message(message: str) -> bool:
+    normalized_message = message.lower()
+    return _matches_any(
+        normalized_message,
+        [
+            r"\b(book|schedule|reserve)\b.{0,40}\b(appointment|meeting|visit|rendez-vous)\b",
+            r"\b(create|make)\b.{0,20}\b(an?\s+)?appointment\b",
+            r"\b(appointment|meeting|visit|rendez-vous)\b.{0,40}\b(book|scheduled?|reserved?)\b",
+        ],
+    )
+
+
+def _is_appointment_lookup_message(message: str) -> bool:
+    normalized_message = message.lower()
+    if _is_appointment_booking_message(message):
+        return False
+
+    return _matches_any(
+        normalized_message,
+        [
+            r"^\s*do\s+i\s+have\b.*\b(appointment|meeting|visit|rendez-vous)\b",
+            r"\b(appointment|meeting|visit|rendez-vous)\b.*\b(status|confirmed|confirmation|existing)\b",
+            r"\b(status|confirmed|confirmation|existing)\b.*\b(appointment|meeting|visit|rendez-vous)\b",
+            r"\bcard\s+pickup\b.*\bappointment\b",
+            r"\bbranch\s+appointment\b.*\b(confirmed|have)\b",
+        ],
+    )
 
 
 def detect_intent(message: str) -> tuple[str, float]:
@@ -851,6 +910,9 @@ def detect_intent(message: str) -> tuple[str, float]:
 
     if _has_any(normalized_message, ["available slots", "appointment slots", "show slots", "available appointments"]):
         return "list_appointment_slots", 0.86
+
+    if _is_appointment_lookup_message(message):
+        return "unknown", 0.35
 
     failed_transfer = _matches_any(
         normalized_message,
@@ -888,6 +950,9 @@ def detect_intent(message: str) -> tuple[str, float]:
     if complaint_language or _has_any(normalized_message, ["card issue", "account access issue", "payment issue"]):
         return "create_complaint", 0.86
 
+    if _is_account_details_request(message):
+        return "check_balance", 0.88
+
     if _matches_any(
         normalized_message,
         [
@@ -905,6 +970,8 @@ def detect_intent(message: str) -> tuple[str, float]:
             r"\b(send|transfer|wire)\b.*\b(money|dinars?|tnd|dt|ben_\d+)\b",
             r"\bneed\s+to\s+send\b",
             r"\bmake\s+a\s+transfer\b",
+            r"\bprepare\s+(?:the\s+)?transfer\b",
+            r"\btransfer\s+order\b",
         ],
     ):
         return "make_transfer", 0.88
@@ -924,17 +991,16 @@ def detect_intent(message: str) -> tuple[str, float]:
     if _has_any(normalized_message, ["balance", "solde", "how much"]) and "bill" not in normalized_message:
         return "check_balance", 0.86
 
-    if _has_any(
-        normalized_message,
-        ["appointment", "rendez-vous", "visit", "branch", "agence", "meeting"],
-    ):
+    if _is_appointment_booking_message(message):
         return "book_appointment", 0.82
 
     for intent, keywords in INTENT_KEYWORDS.items():
+        if intent == "book_appointment" and _is_appointment_lookup_message(message):
+            continue
         if any(keyword in normalized_message for keyword in keywords):
             return intent, 0.72
 
-    if _has_any(normalized_message, ["help", "what can you do", "assist me"]):
+    if _is_capabilities_question(message):
         return "informational_answer", 0.65
 
     return "unknown", 0.3
@@ -1105,6 +1171,88 @@ FIELD_HINTS = {
     "description": ("a short description of the issue", None),
     "reference": ("the complaint reference", "CMP-DEMO-2026-000001"),
 }
+
+
+def _option(label: str, value: str | None = None) -> dict:
+    return {
+        "label": label,
+        "value": value or label,
+        "action": "prompt",
+        "prompt": label,
+    }
+
+
+def _clarification_quick_actions(intent: str, missing_fields: list[str]) -> list[dict]:
+    first_missing = missing_fields[0] if missing_fields else None
+
+    if intent == "check_balance" and first_missing == "accountId":
+        return [
+            _option("Current account", "acc_001"),
+            _option("Savings account", "acc_002"),
+            _option("acc_001", "acc_001"),
+            _option("acc_002", "acc_002"),
+        ]
+
+    if intent == "pay_bill":
+        if first_missing == "provider":
+            return [
+                _option("SONEDE"),
+                _option("STEG"),
+                _option("Telecom", "TELECOM"),
+                _option("Internet", "INTERNET"),
+            ]
+        if first_missing == "sourceAccountId":
+            return [
+                _option("Current account", "acc_001"),
+                _option("Savings account", "acc_002"),
+                _option("acc_001", "acc_001"),
+                _option("acc_002", "acc_002"),
+            ]
+
+    if intent == "book_appointment" and first_missing == "branch":
+        return [
+            _option("Tunis Centre"),
+            _option("Ariana"),
+            _option("Sfax"),
+            _option("Online appointment"),
+        ]
+
+    if intent == "create_complaint" and first_missing == "category":
+        return [
+            _option("Failed transfer"),
+            _option("Card issue"),
+            _option("Account access issue"),
+            _option("Other"),
+        ]
+
+    return []
+
+
+def _merge_quick_actions(tool_input: dict, quick_actions: list[dict]) -> dict:
+    if not quick_actions:
+        return tool_input
+
+    existing_actions = tool_input.get("quickActions") if isinstance(tool_input, dict) else None
+    merged_actions = [
+        *(existing_actions if isinstance(existing_actions, list) else []),
+        *quick_actions,
+    ]
+
+    return {
+        **(tool_input or {}),
+        "quickActions": merged_actions,
+    }
+
+
+def _action_tool_input(
+    request: AgentAnalyzeRequest,
+    intent: str,
+    missing_fields: list[str],
+) -> dict:
+    return _merge_quick_actions(
+        _resource_tool_input(request),
+        _clarification_quick_actions(intent, missing_fields),
+    )
 
 
 def _describe_missing_field(field: str) -> str:
@@ -1288,6 +1436,13 @@ def _format_money(value, currency: str = "TND") -> str:
     return f"{amount:.3f} {currency or 'TND'}"
 
 
+def _format_grouped_money(value, currency: str = "TND") -> str:
+    amount = _parse_money_value(value)
+    if amount is None:
+        return str(value or "").strip()
+    return f"{amount:,.3f} {currency or 'TND'}"
+
+
 def _format_signed_money(value, currency: str = "TND") -> str:
     amount = _parse_money_value(value)
     if amount is None:
@@ -1304,11 +1459,830 @@ def _markdown_table(rows: list[tuple[str, object]]) -> str:
     ]
     if not usable_rows:
         return ""
+
+    def clean_cell(value: object) -> str:
+        return (
+            str(value)
+            .replace("\r\n", " ")
+            .replace("\n", " ")
+            .replace("|", "\\|")
+            .strip()
+        )
+
     return "\n".join([
         "| Field | Value |",
         "|---|---|",
-        *[f"| {label} | {value} |" for label, value in usable_rows],
+        *[f"| {clean_cell(label)} | {clean_cell(value)} |" for label, value in usable_rows],
     ])
+
+
+TECHNICAL_RESOURCE_FIELDS = {
+    "body",
+    "content",
+    "debug",
+    "documenturl",
+    "environment",
+    "fileurl",
+    "jsonurl",
+    "keywords",
+    "localpathhint",
+    "metadata",
+    "mimetype",
+    "note",
+    "resourceid",
+    "resourcetype",
+    "resourceurl",
+    "service",
+    "synthetic",
+    "text",
+    "url",
+}
+
+BUSINESS_FIELD_PRIORITY = [
+    "card",
+    "cardType",
+    "cardNumber",
+    "currentLimit",
+    "availableLimit",
+    "limit",
+    "currency",
+    "status",
+    "effectiveDate",
+    "lastUpdate",
+    "nextReviewDate",
+    "statementDate",
+    "paymentDueDate",
+    "minimumPayment",
+    "customerId",
+    "fullName",
+    "customerName",
+    "segment",
+    "email",
+    "phone",
+    "primaryBranch",
+    "relationshipStartDate",
+    "riskLevel",
+    "preferredLanguage",
+    "formId",
+    "countryOfResidence",
+    "taxIdStatus",
+    "signatureStatus",
+    "receiptId",
+    "accountId",
+    "atmLocation",
+    "amount",
+    "date",
+    "time",
+    "requestId",
+    "reference",
+    "reason",
+    "requestedBranch",
+    "branch",
+    "fee",
+]
+
+GENERIC_FIELD_CONTAINERS = {
+    "fields",
+    "extractedfields",
+    "metadata",
+    "data",
+    "content",
+    "parsedfields",
+}
+
+GENERIC_FIELD_PRIORITY = [
+    "name",
+    "fullname",
+    "customername",
+    "segment",
+    "branch",
+    "primarybranch",
+    "preferredlanguage",
+    "amount",
+    "limit",
+    "currentlimit",
+    "availablelimit",
+    "fee",
+    "rate",
+    "premium",
+    "status",
+    "requeststatus",
+    "signaturestatus",
+    "risklevel",
+    "duedate",
+    "paymentduedate",
+    "statementdate",
+    "nextexecutiondate",
+    "appointmentdate",
+    "startdate",
+    "relationshipstartdate",
+    "enddate",
+    "requestid",
+    "receiptid",
+    "billid",
+    "certificateid",
+    "policyid",
+    "reference",
+]
+
+GENERIC_LABEL_OVERRIDES = {
+    "fullname": "Full name",
+    "primarybranch": "Primary branch",
+    "preferredlanguage": "Preferred language",
+    "currentlimit": "Current limit",
+    "availablelimit": "Available limit",
+    "paymentduedate": "Payment due date",
+}
+
+IMPORTANT_RESOURCE_FIELDS = {
+    "amount",
+    "availablelimit",
+    "balance",
+    "closingbalance",
+    "currentlimit",
+    "fee",
+    "limit",
+    "minimumpayment",
+    "monthlypayment",
+    "remainingbalance",
+    "signaturestatus",
+    "status",
+    "totalfees",
+}
+
+
+def _normalized_resource_key(key: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(key or "").lower())
+
+
+def _is_technical_resource_field(key: str) -> bool:
+    normalized_key = _normalized_resource_key(key)
+    return (
+        normalized_key in TECHNICAL_RESOURCE_FIELDS
+        or normalized_key.startswith("debug")
+        or normalized_key.startswith("metadata")
+        or normalized_key.endswith("metadata")
+    )
+
+
+def _resource_title(resource_json: dict, fallback: str = "Resource Details") -> str:
+    title = str(resource_json.get("title") or "").strip()
+    return title or fallback
+
+
+def _format_resource_label(key: str) -> str:
+    return re.sub(r"([A-Z])", r" \1", str(key)).replace("_", " ").strip().title()
+
+
+def _humanize_resource_label(key: str) -> str:
+    normalized_key = _normalized_resource_key(key)
+    if normalized_key in GENERIC_LABEL_OVERRIDES:
+        return GENERIC_LABEL_OVERRIDES[normalized_key]
+
+    words = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", str(key or ""))
+    words = re.sub(r"[_\-]+", " ", words).strip()
+    if not words:
+        return ""
+
+    label = words.lower().capitalize()
+    for acronym in ("id", "rib", "iban", "atm", "pdf"):
+        label = re.sub(rf"\b{acronym}\b", acronym.upper(), label, flags=re.IGNORECASE)
+    return label
+
+
+def _format_business_value(key: str, value) -> str:
+    if isinstance(value, bool):
+        text = "Yes" if value else "No"
+    elif isinstance(value, list):
+        scalar_values = [
+            str(item).strip()
+            for item in value
+            if item is not None and not isinstance(item, (dict, list))
+            and str(item).strip()
+        ]
+        text = ", ".join(scalar_values[:8])
+    else:
+        text = str(value).strip()
+
+    if not text:
+        return ""
+
+    if _normalized_resource_key(key) in IMPORTANT_RESOURCE_FIELDS:
+        return f"**{text}**"
+
+    return text
+
+
+def _is_scalar_resource_value(value) -> bool:
+    return value is not None and not isinstance(value, (dict, list, tuple, set))
+
+
+def _stringify_resource_value(value) -> str:
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, list):
+        scalar_values = [
+            str(item).strip()
+            for item in value
+            if _is_scalar_resource_value(item) and str(item).strip()
+        ]
+        return ", ".join(scalar_values[:8])
+    return str(value).strip()
+
+
+def _add_generic_field(
+    fields_by_key: dict[str, dict],
+    key: str,
+    value,
+    order: int,
+    *,
+    source_depth: int = 0,
+) -> int:
+    normalized_key = _normalized_resource_key(key)
+    if not normalized_key or _is_technical_resource_field(key) or normalized_key == "title":
+        return order
+
+    if isinstance(value, list):
+        text = _stringify_resource_value(value)
+    elif _is_scalar_resource_value(value):
+        text = _stringify_resource_value(value)
+    else:
+        return order
+
+    if not text:
+        return order
+
+    candidate = {
+        "key": str(key),
+        "value": text,
+        "rank": _generic_field_rank(str(key)),
+        "order": order,
+        "sourceDepth": source_depth,
+    }
+    existing = fields_by_key.get(normalized_key)
+    if not existing or (
+        candidate["rank"],
+        candidate["sourceDepth"],
+        candidate["order"],
+    ) < (
+        existing["rank"],
+        existing["sourceDepth"],
+        existing["order"],
+    ):
+        fields_by_key[normalized_key] = candidate
+    return order + 1
+
+
+def _generic_field_rank(key: str) -> int:
+    normalized_key = _normalized_resource_key(key)
+    if normalized_key in GENERIC_FIELD_PRIORITY:
+        return GENERIC_FIELD_PRIORITY.index(normalized_key)
+
+    identity_terms = ("name", "segment", "branch", "language")
+    financial_terms = ("amount", "limit", "fee", "rate", "premium", "balance", "payment")
+    status_terms = ("status", "risk")
+    date_terms = ("date", "start", "end", "execution", "update")
+    identifier_terms = ("id", "reference", "receipt", "certificate", "policy", "bill")
+
+    for offset, terms in enumerate((
+        identity_terms,
+        financial_terms,
+        status_terms,
+        date_terms,
+        identifier_terms,
+    )):
+        if any(term in normalized_key for term in terms):
+            return 100 + offset * 100
+
+    if normalized_key == "category":
+        return 900
+    return 700
+
+
+def _field_value_from_row(row: dict) -> tuple[str, object] | None:
+    if not isinstance(row, dict):
+        return None
+    label = (
+        row.get("field")
+        or row.get("Field")
+        or row.get("label")
+        or row.get("Label")
+        or row.get("key")
+        or row.get("Key")
+        or row.get("name")
+        or row.get("Name")
+    )
+    value = row.get("value") if "value" in row else row.get("Value")
+    if label is None or value is None:
+        return None
+    return str(label), value
+
+
+def _collect_fields_from_string(
+    text: str,
+    fields_by_key: dict[str, dict],
+    order: int,
+    source_depth: int,
+) -> int:
+    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+
+    for index, line in enumerate(lines):
+        if "|" not in line:
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) < 2:
+            continue
+        if index + 1 < len(lines) and re.fullmatch(r"\|?\s*:?-{3,}:?\s*\|\s*:?-{3,}:?.*", lines[index + 1]):
+            continue
+        if cells[0].lower() in {"field", "label", "key", "name"} and cells[1].lower() == "value":
+            continue
+        order = _add_generic_field(fields_by_key, cells[0], cells[1], order, source_depth=source_depth)
+
+    for line in lines:
+        match = re.match(r"^([A-Za-z][A-Za-z0-9 _/\-]{1,60})\s*[:=]\s*(.+?)\s*$", line)
+        if match:
+            order = _add_generic_field(fields_by_key, match.group(1), match.group(2), order, source_depth=source_depth)
+
+    return order
+
+
+def _collect_generic_resource_fields(data, fields_by_key: dict[str, dict] | None = None, order: int = 0, depth: int = 0):
+    fields_by_key = fields_by_key if fields_by_key is not None else {}
+    if depth > 4:
+        return fields_by_key, order
+
+    if isinstance(data, dict):
+        row_value = _field_value_from_row(data)
+        if row_value:
+            key, value = row_value
+            order = _add_generic_field(fields_by_key, key, value, order, source_depth=depth)
+            return fields_by_key, order
+
+        for key, value in data.items():
+            normalized_key = _normalized_resource_key(key)
+            if normalized_key == "title":
+                continue
+            if normalized_key in GENERIC_FIELD_CONTAINERS and isinstance(value, (dict, list)):
+                fields_by_key, order = _collect_generic_resource_fields(value, fields_by_key, order, depth + 1)
+            elif normalized_key in GENERIC_FIELD_CONTAINERS and isinstance(value, str):
+                order = _collect_fields_from_string(value, fields_by_key, order, depth + 1)
+            elif _is_technical_resource_field(key):
+                continue
+            elif _is_scalar_resource_value(value) or (
+                isinstance(value, list) and all(_is_scalar_resource_value(item) for item in value)
+            ):
+                order = _add_generic_field(fields_by_key, key, value, order, source_depth=depth)
+            elif isinstance(value, list):
+                fields_by_key, order = _collect_generic_resource_fields(value, fields_by_key, order, depth + 1)
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                row_value = _field_value_from_row(item)
+                if row_value:
+                    key, value = row_value
+                    order = _add_generic_field(fields_by_key, key, value, order, source_depth=depth)
+                else:
+                    fields_by_key, order = _collect_generic_resource_fields(item, fields_by_key, order, depth + 1)
+            elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                order = _add_generic_field(fields_by_key, str(item[0]), item[1], order, source_depth=depth)
+
+    return fields_by_key, order
+
+
+def _generic_resource_rows(resource_json: dict, limit: int = 8) -> list[tuple[str, object]]:
+    fields_by_key, _ = _collect_generic_resource_fields(resource_json)
+    candidates = sorted(fields_by_key.values(), key=lambda item: (item["rank"], item["order"]))
+
+    non_category = [
+        item for item in candidates
+        if _normalized_resource_key(item["key"]) != "category"
+    ]
+    if non_category:
+        candidates = non_category
+
+    return [
+        (_humanize_resource_label(item["key"]), item["value"])
+        for item in candidates[:limit]
+        if _humanize_resource_label(item["key"])
+    ]
+
+
+def _generic_resource_value(resource_json: dict, *keys: str):
+    fields_by_key, _ = _collect_generic_resource_fields(resource_json)
+    for key in keys:
+        item = fields_by_key.get(_normalized_resource_key(key))
+        if item and str(item.get("value") or "").strip():
+            return item["value"]
+    return None
+
+
+def _format_generic_resource_summary(resource_json: dict, limit: int = 8) -> str | None:
+    if not resource_json:
+        return None
+
+    title = _resource_title(resource_json)
+    rows = _generic_resource_rows(resource_json, limit=limit)
+    if not rows:
+        return f"I found your **{title}**."
+
+    return "\n\n".join([
+        f"I found your **{title}**.",
+        _markdown_bullets(rows),
+    ])
+
+
+def _resource_first_value(resource_json: dict, *keys: str):
+    for key in keys:
+        value = resource_json.get(key)
+        if value is not None and str(value).strip() != "":
+            return value
+    return None
+
+
+def _bold_value(value) -> str:
+    raw_text = str(value or "").strip()
+    if raw_text.startswith("**") and raw_text.endswith("**"):
+        return raw_text
+    text = (
+        raw_text
+        .replace("\r\n", " ")
+        .replace("\n", " ")
+        .replace("|", "\\|")
+        .replace("*", "\\*")
+        .strip()
+    )
+    return f"**{text}**" if text else ""
+
+
+def _markdown_bullets(rows: list[tuple[str, object]]) -> str:
+    lines = []
+    for label, value in rows:
+        if value is None or str(value).strip() == "":
+            continue
+        lines.append(f"- {label}: {_bold_value(value)}")
+    return "\n".join(lines)
+
+
+def _compact_join(parts: list[object], separator: str = " ") -> str:
+    return separator.join(
+        str(part).strip()
+        for part in parts
+        if part is not None and str(part).strip()
+    ).strip()
+
+
+def _resource_reference_line(resource_json: dict, *keys: str) -> str:
+    reference = _resource_first_value(resource_json, *keys, "reference", "requestId", "receiptId")
+    return f"Reference: {_bold_value(reference)}" if reference else ""
+
+
+def _appointment_label(resource_json: dict, resource_type: str) -> str:
+    purpose = str(resource_json.get("purpose") or resource_json.get("title") or "").lower()
+    if resource_type == "card_pickup_appointment" or "card pickup" in purpose:
+        return "card pickup appointment"
+    return "branch appointment"
+
+
+def _format_appointment_resource(resource_json: dict, resource_type: str) -> str:
+    label = _appointment_label(resource_json, resource_type)
+    status = resource_json.get("status")
+    branch = resource_json.get("branch")
+    date = resource_json.get("date")
+    time = resource_json.get("time")
+    advisor = resource_json.get("advisor")
+
+    intro = (
+        f"Yes, your {_bold_value(label)} is {_bold_value(str(status).lower())}."
+        if status
+        else f"Yes, I found your {_bold_value(label)}."
+    )
+
+    schedule_parts = []
+    if branch:
+        schedule_parts.append(f"at {_bold_value(branch)}")
+    if date:
+        schedule_parts.append(f"on {_bold_value(date)}")
+    if time:
+        schedule_parts.append(f"at {_bold_value(time)}")
+
+    schedule = ""
+    if schedule_parts:
+        schedule = f"It is scheduled {' '.join(schedule_parts)}"
+        if advisor:
+            schedule += f" with advisor {_bold_value(advisor)}"
+        schedule += "."
+    elif advisor:
+        schedule = f"Advisor: {_bold_value(advisor)}"
+
+    return "\n\n".join(filter(None, [
+        intro,
+        schedule,
+        _resource_reference_line(resource_json),
+    ])).strip()
+
+
+def _format_card_service_request(resource_json: dict) -> str:
+    status = resource_json.get("status")
+    request_id = resource_json.get("requestId") or resource_json.get("reference")
+    card = resource_json.get("card") or resource_json.get("cardNumber")
+    branch = resource_json.get("requestedBranch") or resource_json.get("branch")
+
+    intro_parts = ["Your", _bold_value("debit card replacement request")]
+    if request_id:
+        intro_parts.append(_bold_value(request_id))
+    intro = _compact_join(intro_parts)
+    intro += f" is {_bold_value(str(status).lower())}." if status else " was found."
+
+    details = []
+    if card:
+        details.append(f"Card: {_bold_value(card)}")
+    if resource_json.get("reason"):
+        details.append(f"Reason: {_bold_value(resource_json.get('reason'))}")
+    if branch:
+        details.append(f"Branch: {_bold_value(branch)}")
+    if resource_json.get("fee"):
+        details.append(f"Fee: {_bold_value(resource_json.get('fee'))}")
+
+    return "\n\n".join(filter(None, [
+        intro,
+        ". ".join(details) + "." if details else "",
+        "Next step: **confirm the replacement request** if the details are correct.",
+    ])).strip()
+
+
+def _format_checkbook_request(resource_json: dict) -> str:
+    status = resource_json.get("status")
+    request_id = resource_json.get("requestId") or resource_json.get("reference")
+    intro = "Your **checkbook request**"
+    if request_id:
+        intro += f" {_bold_value(request_id)}"
+    intro += f" is {_bold_value(str(status).lower())}." if status else " was found."
+
+    details = []
+    if resource_json.get("numberOfChecks"):
+        details.append(f"for {_bold_value(resource_json.get('numberOfChecks'))} checks")
+    if resource_json.get("accountId"):
+        details.append(f"on account {_bold_value(resource_json.get('accountId'))}")
+    branch = resource_json.get("requestedBranch") or resource_json.get("branch")
+    if branch:
+        details.append(f"at {_bold_value(branch)}")
+    request_date = resource_json.get("requestDate") or resource_json.get("requestedOn") or resource_json.get("date")
+    if request_date:
+        details.append(f"requested on {_bold_value(request_date)}")
+
+    ready_date = (
+        resource_json.get("estimatedReadyDate")
+        or resource_json.get("estimatedAvailability")
+        or resource_json.get("availableOn")
+    )
+
+    return "\n\n".join(filter(None, [
+        intro,
+        f"It is {' '.join(details)}." if details else "",
+        f"Estimated ready date: {_bold_value(ready_date)}" if ready_date else "",
+    ])).strip()
+
+
+def _format_card_limit_notice(resource_json: dict) -> str:
+    current_limit = (
+        _generic_resource_value(resource_json, "currentLimit", "limit", "creditLimit")
+        or resource_json.get("currentLimit")
+        or resource_json.get("limit")
+        or resource_json.get("creditLimit")
+    )
+    card = _generic_resource_value(resource_json, "card", "cardNumber") or resource_json.get("card") or resource_json.get("cardNumber")
+    status = _generic_resource_value(resource_json, "status") or resource_json.get("status")
+
+    intro = "Your credit card limit"
+    if card:
+        intro += f" for {_bold_value(card)}"
+    intro += f" is {_bold_value(current_limit)}." if current_limit else " was found."
+
+    details = []
+    if current_limit:
+        details.append(f"Current limit: {_bold_value(current_limit)}")
+    available_limit = _generic_resource_value(resource_json, "availableLimit") or resource_json.get("availableLimit")
+    minimum_payment = _generic_resource_value(resource_json, "minimumPayment") or resource_json.get("minimumPayment")
+    payment_due_date = _generic_resource_value(resource_json, "paymentDueDate", "dueDate") or resource_json.get("paymentDueDate")
+    if available_limit:
+        details.append(f"Available limit: {_bold_value(available_limit)}")
+    if status:
+        details.append(f"Status: {_bold_value(str(status).lower())}")
+    if minimum_payment:
+        details.append(f"Minimum payment: {_bold_value(minimum_payment)}")
+    if payment_due_date:
+        details.append(f"Payment due date: {_bold_value(payment_due_date)}")
+
+    return "\n\n".join(filter(None, [
+        intro,
+        ". ".join(details) + "." if details else "",
+    ])).strip()
+
+
+def _format_tax_form(resource_json: dict) -> str:
+    form_id = resource_json.get("formId") or resource_json.get("reference")
+    signature_status = resource_json.get("signatureStatus")
+    intro = "Your **tax residency self-certification**"
+    if form_id:
+        intro += f" {_bold_value(form_id)}"
+    intro += f" is {_bold_value(str(signature_status).lower())}." if signature_status else " was found."
+
+    details = []
+    if resource_json.get("countryOfResidence"):
+        details.append(f"Country of residence: {_bold_value(resource_json.get('countryOfResidence'))}")
+    if resource_json.get("taxIdStatus"):
+        details.append(f"Tax ID status: {_bold_value(resource_json.get('taxIdStatus'))}")
+    if resource_json.get("lastUpdate"):
+        details.append(f"Last update: {_bold_value(resource_json.get('lastUpdate'))}")
+
+    return "\n\n".join(filter(None, [
+        intro,
+        ". ".join(details) + "." if details else "",
+    ])).strip()
+
+
+def _format_receipt_summary(resource_json: dict, resource_type: str) -> str:
+    receipt_id = resource_json.get("receiptId") or resource_json.get("reference")
+    status = resource_json.get("status")
+
+    if resource_type == "payment_receipt":
+        provider = resource_json.get("provider") or "bill"
+        intro = f"Your {_bold_value(provider)} payment receipt"
+        if receipt_id:
+            intro += f" {_bold_value(receipt_id)}"
+        intro += f" is {_bold_value(str(status).lower())}." if status else " was found."
+        details = [
+            f"Amount: {_bold_value(resource_json.get('amount'))}" if resource_json.get("amount") else "",
+            f"Bill reference: {_bold_value(resource_json.get('billReference'))}" if resource_json.get("billReference") else "",
+            f"Paid on: {_bold_value(resource_json.get('paymentDate'))}" if resource_json.get("paymentDate") else "",
+        ]
+    elif resource_type == "fx_receipt":
+        intro = "Your **foreign currency exchange receipt**"
+        if receipt_id:
+            intro += f" {_bold_value(receipt_id)}"
+        intro += " was found."
+        details = [
+            f"Converted: {_bold_value(resource_json.get('amountTnd'))} to {_bold_value(resource_json.get('amountEur'))}"
+            if resource_json.get("amountTnd") and resource_json.get("amountEur") else "",
+            f"Rate: {_bold_value(resource_json.get('rate'))}" if resource_json.get("rate") else "",
+            f"Date: {_bold_value(resource_json.get('date'))}" if resource_json.get("date") else "",
+        ]
+    else:
+        intro = "Your **ATM withdrawal receipt**"
+        if receipt_id:
+            intro += f" {_bold_value(receipt_id)}"
+        intro += f" is {_bold_value(str(status).lower())}." if status else " was found."
+        details = [
+            f"Amount: {_bold_value(resource_json.get('amount'))}" if resource_json.get("amount") else "",
+            f"ATM location: {_bold_value(resource_json.get('atmLocation') or resource_json.get('location'))}"
+            if resource_json.get("atmLocation") or resource_json.get("location") else "",
+            f"Date and time: {_bold_value(_compact_join([resource_json.get('date'), resource_json.get('time')]))}"
+            if resource_json.get("date") or resource_json.get("time") else "",
+        ]
+
+    return "\n\n".join(filter(None, [
+        intro,
+        ". ".join(detail for detail in details if detail) + "." if any(details) else "",
+    ])).strip()
+
+
+def _is_summary_request(message: str) -> bool:
+    normalized = str(message or "").lower()
+    return bool(re.search(r"\b(summarize|summarise|summary|overview|recap)\b", normalized))
+
+
+def _is_open_document_request(message: str) -> bool:
+    normalized = str(message or "").lower()
+    return bool(re.search(r"\b(open|download|get|show|view|fetch)\b", normalized))
+
+
+def _is_activation_how_to_request(message: str) -> bool:
+    normalized = str(message or "").lower()
+    return bool(
+        re.search(r"\bhow\s+(?:do|can)\s+i\b.*\bactivate\b", normalized)
+        or re.search(r"\bactivate\b.*\b(atb\s+connect|connect)\b", normalized)
+    )
+
+
+def _is_atb_connect_id_question(message: str) -> bool:
+    normalized = str(message or "").lower()
+    return bool(
+        re.search(r"\bwhat\b.*\b(id|identification|document)\b.*\bneed\b", normalized)
+        or re.search(r"\bwhich\b.*\b(id|identification|document)\b.*\bneed\b", normalized)
+        or re.search(r"\brequired\s+id\b", normalized)
+    )
+
+
+def _atb_connect_key_points(resource_json: dict) -> str:
+    return _markdown_bullets([
+        ("Required ID", resource_json.get("requiredId")),
+        ("Activation channel", resource_json.get("activationChannel")),
+        ("Support", resource_json.get("supportChannel")),
+        ("Status", resource_json.get("status")),
+    ])
+
+
+def _atb_connect_steps(resource_json: dict, file_text: str) -> list[str]:
+    steps = resource_json.get("steps") or resource_json.get("activationSteps")
+    if isinstance(steps, list) and steps:
+        return [str(step).strip() for step in steps if str(step).strip()]
+
+    extracted_steps = _extract_numbered_steps(
+        file_text,
+        "Activation Steps",
+        ["Agent Expected Behavior", "Synthetic document"],
+    )
+    if extracted_steps:
+        return extracted_steps
+
+    return [
+        "Verify your identity with **CIN or passport**.",
+        "Choose branch or online onboarding.",
+        "Register your mobile number and email address.",
+        "Create your password.",
+        "Set up OTP verification.",
+        "Review your first login.",
+    ]
+
+
+def _format_atb_connect_resource(
+    request: AgentAnalyzeRequest,
+    resource_json: dict,
+    file_text: str,
+) -> str:
+    message = request.message
+    title = _resource_title(resource_json, "ATB Connect Activation Guide")
+
+    if _is_open_document_request(message) and not _is_summary_request(message):
+        return (
+            f"I found the ATB Connect guide: **{title}**.\n\n"
+            "Use **Download PDF** to open the document."
+        )
+
+    if _is_activation_how_to_request(message):
+        steps = _atb_connect_steps(resource_json, file_text)
+        return "\n\n".join([
+            "Here is how to activate **ATB Connect**.",
+            "\n".join(f"{index + 1}. {step}" for index, step in enumerate(steps[:8])),
+            _atb_connect_key_points(resource_json),
+        ]).strip()
+
+    summary_intro = (
+        f"I found the latest ATB Connect resource: **{title}**."
+        if "latest" in str(message or "").lower()
+        else f"I found an ATB Connect resource: **{title}**."
+    )
+    summary = (
+        "This resource explains how a customer can activate ATB Connect through "
+        "branch or online onboarding. It covers identity verification, "
+        "mobile/email registration, password creation, OTP setup, and first "
+        "login review."
+    )
+
+    return "\n\n".join([
+        summary_intro,
+        summary,
+        "Key points:",
+        _atb_connect_key_points(resource_json),
+    ]).strip()
+
+
+def _business_resource_bullets(resource_json: dict, limit: int = 8) -> str:
+    return _markdown_bullets(_business_resource_rows(resource_json, limit))
+
+
+def _business_resource_rows(resource_json: dict, limit: int = 12) -> list[tuple[str, object]]:
+    rows_by_key: dict[str, tuple[str, object]] = {}
+
+    for key, value in resource_json.items():
+        if (
+            _is_technical_resource_field(key)
+            or key == "title"
+            or value is None
+            or isinstance(value, dict)
+        ):
+            continue
+
+        formatted_value = _format_business_value(key, value)
+        if not formatted_value:
+            continue
+
+        rows_by_key[key] = (_format_resource_label(key), formatted_value)
+
+    ordered_keys = [
+        key for key in BUSINESS_FIELD_PRIORITY
+        if key in rows_by_key
+    ]
+    ordered_keys.extend(
+        key for key in rows_by_key
+        if key not in ordered_keys
+    )
+
+    return [rows_by_key[key] for key in ordered_keys[:limit]]
+
+
+def _business_resource_table(resource_json: dict, limit: int = 12) -> str:
+    return _markdown_table(_business_resource_rows(resource_json, limit))
 
 
 def _resource_json(request: AgentAnalyzeRequest) -> dict:
@@ -1335,44 +2309,94 @@ BILL_RESOURCE_TYPES = {
     "payment_resource",
 }
 
+TRANSFER_RESOURCE_TYPES = {
+    "transfer_order",
+    "transfer_request",
+    "transfer_instruction",
+}
+
+APPOINTMENT_RESOURCE_TYPES = {
+    "appointment_request",
+    "appointment_confirmation",
+    "card_pickup_appointment",
+}
+
+COMPLAINT_RESOURCE_TYPES = {
+    "complaint_document",
+    "complaint_request",
+    "transfer_dispute",
+    "card_dispute",
+    "card_dispute_report",
+}
+
 
 DIRECT_FACTUAL_RESOURCE_PATTERNS = [
-    r"^\s*what\s+(?:is|was)\b",
+    r"^\s*what\s+(?:is|are|was|does)\b",
     r"^\s*when\s+is\b",
     r"^\s*how\s+much\b",
     r"^\s*do\s+i\s+have\b",
+    r"^\s*which\b",
     r"\bstatus\s+of\b",
+    r"\brecommend\b",
     r"\bdue\b",
 ]
 
 DOCUMENT_ORIENTED_TERMS = {
     "download",
+    "fetch",
+    "find",
+    "form",
     "get",
+    "guide",
     "show",
     "open",
+    "policy",
+    "profile",
+    "product sheet",
     "view",
     "summarize",
     "summary",
     "statement",
     "certificate",
     "document",
+    "notice",
+    "receipt",
     "report",
+    "sheet",
     "pdf",
 }
 
 DOWNLOAD_ELIGIBLE_RESOURCE_TYPES = {
+    "account_closure_request",
     "account_statement",
     "rib_certificate",
     "account_certificate",
     "card_dispute_report",
     "card_dispute",
+    "card_service_request",
+    "checkbook_request",
+    "cheque_book_request",
+    "atm_receipt",
+    "digital_banking_guide",
+    "fx_receipt",
+    "insurance_policy",
+    "payment_receipt",
+    "product_sheet",
+    "security_notice",
+    "tax_form",
+    "salary_certificate",
     "transfer_order",
+    "card_limit_notice",
+    "customer_profile",
+    "account_profile",
+    "account_summary",
 }
 
 DOWNLOAD_EXCLUDED_RESOURCE_TYPES = {
     "loan_schedule",
     "fees_notice",
     "appointment_confirmation",
+    "card_pickup_appointment",
     "kyc_summary",
 }
 
@@ -1385,20 +2409,35 @@ def should_show_download_pdf(user_message: str, resource_type: str) -> bool:
         str(resource_type or "").lower(),
     ).strip("_")
 
-    if any(re.search(pattern, normalized_message) for pattern in DIRECT_FACTUAL_RESOURCE_PATTERNS):
+    if normalized_resource_type in {"atb_connect_guide", "digital_banking_guide"}:
+        if _is_atb_connect_id_question(normalized_message):
+            return False
+        if _is_activation_how_to_request(normalized_message):
+            return True
+
+    is_document_oriented = any(term in normalized_message for term in DOCUMENT_ORIENTED_TERMS)
+
+    is_direct_resource_question = any(
+        re.search(pattern, normalized_message)
+        for pattern in DIRECT_FACTUAL_RESOURCE_PATTERNS
+    )
+    has_open_document_verb = bool(
+        re.search(r"\b(show|get|open|download|view|fetch|display)\b", normalized_message)
+    )
+
+    if is_direct_resource_question and not has_open_document_verb:
         return False
 
     if normalized_resource_type in DOWNLOAD_EXCLUDED_RESOURCE_TYPES:
         return False
 
-    is_document_oriented = any(term in normalized_message for term in DOCUMENT_ORIENTED_TERMS)
     if not is_document_oriented:
         return False
 
     if normalized_resource_type in DOWNLOAD_ELIGIBLE_RESOURCE_TYPES:
         return True
 
-    return any(term in normalized_message for term in {"download", "open", "pdf", "document"})
+    return is_document_oriented
 
 
 def _find_resource_value(data, keys: set[str]):
@@ -1421,35 +2460,105 @@ def _find_resource_value(data, keys: set[str]):
 
 
 def _resource_fields_for_intent(intent: str, request: AgentAnalyzeRequest) -> dict:
-    if intent != "pay_bill" or not request.resolvedResourceContext:
+    if not request.resolvedResourceContext:
         return {}
 
     resource_json = _resource_json(request)
     resource_type = _resource_type(request)
-    if resource_type not in BILL_RESOURCE_TYPES:
-        return {}
 
-    fields = {
-        "provider": _find_resource_value(resource_json, {"provider", "biller", "merchant"}),
-        "billReference": _find_resource_value(
-            resource_json,
-            {"billReference", "billRef", "invoiceReference", "reference"},
-        ),
-        "amount": _find_resource_value(
-            resource_json,
-            {"amount", "totalAmount", "total", "amountDue"},
-        ),
-        "currency": _find_resource_value(resource_json, {"currency"}),
-        "dueDate": _find_resource_value(
-            resource_json,
-            {"dueDate", "paymentDueDate", "deadline"},
-        ),
-        "sourceAccountId": _find_resource_value(
-            resource_json,
-            {"sourceAccountId", "accountId", "debitAccountId"},
-        ),
-    }
-    return _clean_extracted_fields(fields)
+    if intent == "pay_bill":
+        if resource_type not in BILL_RESOURCE_TYPES:
+            return {}
+
+        fields = {
+            "provider": _find_resource_value(resource_json, {"provider", "biller", "merchant"}),
+            "billReference": _find_resource_value(
+                resource_json,
+                {"billReference", "billRef", "invoiceReference", "reference"},
+            ),
+            "amount": _find_resource_value(
+                resource_json,
+                {"amount", "totalAmount", "total", "amountDue"},
+            ),
+            "currency": _find_resource_value(resource_json, {"currency"}),
+            "dueDate": _find_resource_value(
+                resource_json,
+                {"dueDate", "paymentDueDate", "deadline"},
+            ),
+            "sourceAccountId": _find_resource_value(
+                resource_json,
+                {"sourceAccountId", "accountId", "debitAccountId"},
+            ),
+        }
+        return _clean_extracted_fields(fields)
+
+    if intent == "make_transfer":
+        if resource_type not in TRANSFER_RESOURCE_TYPES:
+            return {}
+
+        fields = {
+            "sourceAccountId": _find_resource_value(
+                resource_json,
+                {"sourceAccountId", "accountId", "debitAccountId", "fromAccountId"},
+            ),
+            "beneficiaryId": _find_resource_value(resource_json, {"beneficiaryId"}),
+            "beneficiaryName": _find_resource_value(resource_json, {"beneficiaryName", "beneficiary"}),
+            "amount": _find_resource_value(resource_json, {"amount", "transferAmount", "totalAmount"}),
+            "currency": _find_resource_value(resource_json, {"currency"}),
+            "reason": _find_resource_value(resource_json, {"reason", "purpose", "memo"}),
+        }
+        return _clean_extracted_fields(fields)
+
+    if intent == "book_appointment":
+        if resource_type not in APPOINTMENT_RESOURCE_TYPES:
+            return {}
+
+        fields = {
+            "branch": _find_resource_value(resource_json, {"branch", "agency"}),
+            "date": _find_resource_value(resource_json, {"date", "appointmentDate"}),
+            "time": _find_resource_value(resource_json, {"time", "appointmentTime", "slot"}),
+        }
+        return _clean_extracted_fields(fields)
+
+    if intent == "create_complaint":
+        if resource_type not in COMPLAINT_RESOURCE_TYPES:
+            return {}
+
+        category = _find_resource_value(resource_json, {"category", "complaintCategory", "issueType"})
+        if not category and resource_type in {"card_dispute", "card_dispute_report"}:
+            category = "Card issue"
+        if not category and "transfer" in resource_type:
+            category = "Failed transfer"
+
+        description = _find_resource_value(resource_json, {"description", "details", "summary", "reason"})
+        if not description:
+            reference = _find_resource_value(resource_json, {"reference", "disputeId", "resourceId"})
+            status = _find_resource_value(resource_json, {"status"})
+            merchant = _find_resource_value(resource_json, {"merchant", "beneficiaryName", "beneficiary"})
+            amount = _find_resource_value(resource_json, {"amount", "transferAmount", "totalAmount"})
+            parts = [
+                str(category or "Complaint issue"),
+                f"reference {reference}" if reference else "",
+                f"status {status}" if status else "",
+                f"related to {merchant}" if merchant else "",
+                f"for {_format_money(amount, _find_resource_value(resource_json, {'currency'}) or 'TND')}" if amount else "",
+            ]
+            description = " ".join(part for part in parts if part).strip()
+
+        fields = {
+            "category": category,
+            "description": description,
+            "sourceAccountId": _find_resource_value(resource_json, {"sourceAccountId", "accountId"}),
+            "relatedReference": _find_resource_value(
+                resource_json,
+                {"reference", "transferReference", "transactionReference", "disputeId"},
+            ),
+            "amount": _find_resource_value(resource_json, {"amount", "transferAmount", "totalAmount"}),
+            "currency": _find_resource_value(resource_json, {"currency"}),
+        }
+        return _clean_extracted_fields(fields)
+
+    return {}
 
 
 def _resource_quick_actions(request: AgentAnalyzeRequest) -> list[dict]:
@@ -1470,12 +2579,6 @@ def _resource_quick_actions(request: AgentAnalyzeRequest) -> list[dict]:
             "label": "Prepare transfer",
             "action": "continue",
             "prompt": "Prepare transfer",
-        })
-    elif resource_type == "appointment_confirmation":
-        actions.append({
-            "label": "Book appointment",
-            "action": "prompt",
-            "prompt": "Book appointment",
         })
 
     return actions[:3]
@@ -1851,13 +2954,104 @@ def _build_resource_account_statement_summary(resource_json: dict) -> str:
     return "\n".join(line for line in lines if line is not None)
 
 
+def _format_branch_rows(branches) -> str | None:
+    if not isinstance(branches, list) or not branches:
+        return None
+
+    lines = ["| Branch | Address | Hours | Services |", "|---|---|---|---|"]
+    for branch in branches[:12]:
+        if isinstance(branch, dict):
+            lines.append(
+                f"| {branch.get('name') or branch.get('branch') or '-'} | "
+                f"{branch.get('address') or '-'} | "
+                f"{branch.get('hours') or branch.get('openingHours') or '-'} | "
+                f"{branch.get('services') or branch.get('serviceList') or '-'} |"
+            )
+        else:
+            lines.append(f"| {branch} | - | - | - |")
+    return "\n".join(lines)
+
+
+def _markdown_grid_table(headers: list[str], rows: list[list[object]]) -> str:
+    usable_rows = [
+        [str(cell or "").replace("\r\n", " ").replace("\n", " ").replace("|", "\\|").strip() or "-" for cell in row]
+        for row in rows
+        if any(str(cell or "").strip() for cell in row)
+    ]
+    if not headers or not usable_rows:
+        return ""
+    return "\n".join([
+        "| " + " | ".join(headers) + " |",
+        "| " + " | ".join("---" for _ in headers) + " |",
+        *["| " + " | ".join(row) + " |" for row in usable_rows],
+    ])
+
+
+DEFAULT_TUNIS_BRANCH_ROWS = [
+    ["Tunis Centre", "Avenue Habib Bourguiba", "08:30–16:30", "Accounts, cards, loans, appointments"],
+    ["Ariana", "Rue de l’Indépendance", "08:30–16:30", "Accounts, ATM, transfers"],
+    ["Lac 1", "Immeuble Business Center", "09:00–17:00", "Premium desk, SME support"],
+    ["Menzah 6", "Avenue Othman Ibn Affan", "08:30–16:30", "Cards, deposits, account services"],
+]
+
+
+def _format_default_tunis_branch_table(resource_json: dict) -> str:
+    if str(resource_json.get("region") or "").lower() != "tunis":
+        return ""
+    return _markdown_grid_table(
+        ["Branch", "Address", "Hours", "Services"],
+        DEFAULT_TUNIS_BRANCH_ROWS,
+    )
+
+
+def _extract_numbered_steps(text: str, start_label: str, end_labels: list[str] | None = None) -> list[str]:
+    section = _extract_text_section(text, start_label, end_labels)
+    if not section:
+        return []
+
+    steps: list[str] = []
+    for line in section.splitlines():
+        match = re.match(r"^\s*\d+\s+(.+?)\s*$", line)
+        if match:
+            steps.append(match.group(1).strip())
+    return steps
+
+
+def _generic_resource_table(resource_json: dict) -> str:
+    return _business_resource_table(resource_json, limit=12)
+
+
+def _extract_text_section(text: str, start_label: str, end_labels: list[str] | None = None) -> str:
+    if not text:
+        return ""
+    normalized = text.replace("\r\n", "\n")
+    start = normalized.lower().find(start_label.lower())
+    if start < 0:
+        return ""
+    section = normalized[start:]
+    for label in end_labels or []:
+        end = section.lower().find(label.lower())
+        if end > 0:
+            section = section[:end]
+            break
+    return "\n".join(
+        line.strip()
+        for line in section.splitlines()
+        if line.strip()
+    ).strip()
+
+
 def _build_resource_summary(request: AgentAnalyzeRequest, file_text: str, extracted_fields: dict) -> str | None:
     resource_json = _resource_json(request)
     resource_type = _resource_type(request)
     currency = resource_json.get("currency") or _extract_currency(file_text, extracted_fields)
+    title = _resource_title(resource_json)
 
     if resource_type == "account_statement":
         return _build_resource_account_statement_summary(resource_json)
+
+    if resource_type == "card_limit_notice":
+        return _format_card_limit_notice(resource_json)
 
     if resource_type == "rib_certificate":
         return "\n\n".join([
@@ -1882,11 +3076,69 @@ def _build_resource_summary(request: AgentAnalyzeRequest, file_text: str, extrac
             ]),
         ])
 
+    if resource_type == "loan_offer":
+        status = resource_json.get("status")
+        max_amount = _resource_first_value(resource_json, "maxAmount", "maximumAmount", "amount")
+        duration = _resource_first_value(resource_json, "duration", "term")
+        rate = _resource_first_value(resource_json, "estimatedRate", "rate", "interestRate")
+        monthly_payment = _resource_first_value(
+            resource_json,
+            "monthlyPaymentExample",
+            "exampleMonthlyPayment",
+            "monthlyPayment",
+        )
+        max_amount_display = _format_grouped_money(max_amount, currency) if max_amount else None
+        monthly_payment_display = (
+            _format_grouped_money(monthly_payment, currency)
+            if monthly_payment
+            else None
+        )
+        segment = _resource_first_value(resource_json, "customerSegment", "segment", "target")
+        intro = f"The available student loan offer is the **{title}**."
+        if segment and "student" not in str(title).lower():
+            intro = f"The available loan offer for **{segment}** customers is **{title}**."
+
+        sentences = []
+        if status:
+            sentences.append(f"You are {_bold_value(status)} for this offer.")
+        if max_amount_display and duration:
+            sentences.append(
+                f"It supports a maximum amount of {_bold_value(max_amount_display)}, "
+                f"with a duration from {_bold_value(duration)}."
+            )
+        elif max_amount_display:
+            sentences.append(f"It supports a maximum amount of {_bold_value(max_amount_display)}.")
+        elif duration:
+            sentences.append(f"The duration is {_bold_value(duration)}.")
+        if rate and monthly_payment_display:
+            sentences.append(
+                f"The estimated rate is {_bold_value(rate)}, and the example monthly "
+                f"payment is {_bold_value(monthly_payment_display)}."
+            )
+        elif rate:
+            sentences.append(f"The estimated rate is {_bold_value(rate)}.")
+        elif monthly_payment_display:
+            sentences.append(f"The example monthly payment is {_bold_value(monthly_payment_display)}.")
+
+        body = " ".join(sentences) if sentences else _business_resource_bullets(resource_json)
+
+        extra = _markdown_bullets([
+            ("Offer reference", resource_json.get("offerId") or resource_json.get("reference")),
+            ("Customer segment", segment),
+        ])
+
+        return "\n\n".join([
+            f"## {title}",
+            intro,
+            body,
+            extra,
+        ]).strip()
+
     if resource_type == "card_dispute":
         return "\n\n".join([
-            "## Card Dispute Status",
+            f"## {title}",
             _markdown_table([
-                ("Dispute", resource_json.get("disputeId") or resource_json.get("resourceId")),
+                ("Dispute", resource_json.get("disputeId") or resource_json.get("reference")),
                 ("Status", resource_json.get("status")),
                 ("Merchant", resource_json.get("merchant")),
                 ("Amount", _format_money(resource_json.get("amount"), currency)),
@@ -1896,7 +3148,7 @@ def _build_resource_summary(request: AgentAnalyzeRequest, file_text: str, extrac
 
     if resource_type == "transfer_order":
         return "\n\n".join([
-            "## Transfer Order",
+            f"## {title}",
             _markdown_table([
                 ("Beneficiary", resource_json.get("beneficiaryName") or resource_json.get("beneficiaryId")),
                 ("From account", resource_json.get("sourceAccountId")),
@@ -1907,7 +3159,7 @@ def _build_resource_summary(request: AgentAnalyzeRequest, file_text: str, extrac
 
     if resource_type == "account_certificate":
         return "\n\n".join([
-            "## Account Ownership Certificate",
+            f"## {title}",
             _markdown_table([
                 ("Customer", resource_json.get("customerName")),
                 ("Account", resource_json.get("accountId")),
@@ -1931,7 +3183,7 @@ def _build_resource_summary(request: AgentAnalyzeRequest, file_text: str, extrac
 
     if resource_type == "kyc_summary":
         return "\n\n".join([
-            "## Customer Profile Summary",
+            f"## {title}",
             _markdown_table([
                 ("Name", resource_json.get("fullName")),
                 ("Email", resource_json.get("email")),
@@ -1941,18 +3193,87 @@ def _build_resource_summary(request: AgentAnalyzeRequest, file_text: str, extrac
             ]),
         ])
 
+    if resource_type in {"customer_profile", "account_profile", "account_summary"}:
+        return _format_generic_resource_summary(resource_json, limit=8)
+
     if resource_type == "appointment_confirmation":
+        return _format_appointment_resource(resource_json, resource_type)
+
+    if resource_type == "card_pickup_appointment":
+        return _format_appointment_resource(resource_json, resource_type)
+
+    if resource_type in {"branch_directory", "branch_list"}:
+        branch_table = _format_branch_rows(resource_json.get("branches") or resource_json.get("items"))
+        default_branch_table = _format_default_tunis_branch_table(resource_json)
         return "\n\n".join([
-            "## Branch Appointment",
-            _markdown_table([
-                ("Status", resource_json.get("status")),
-                ("Branch", resource_json.get("branch")),
-                ("Date", resource_json.get("date")),
-                ("Time", resource_json.get("time")),
-                ("Advisor", resource_json.get("advisor")),
-                ("Reference", resource_json.get("reference")),
-            ]),
-        ])
+            f"## {title}",
+            branch_table or default_branch_table or _generic_resource_table(resource_json),
+        ]).strip()
+
+    if resource_type in {"atb_connect_guide", "digital_banking_guide"}:
+        return _format_atb_connect_resource(request, resource_json, file_text)
+
+    if resource_type in {"checkbook_request", "cheque_book_request"}:
+        return _format_checkbook_request(resource_json)
+
+    if resource_type == "card_service_request":
+        return _format_card_service_request(resource_json)
+
+    if resource_type == "atm_receipt":
+        return _format_receipt_summary(resource_json, resource_type)
+
+    if resource_type in {"payment_receipt", "fx_receipt"}:
+        return _format_receipt_summary(resource_json, resource_type)
+
+    if resource_type == "tax_form":
+        return _format_tax_form(resource_json)
+
+    if resource_type == "product_sheet":
+        feature_values = [
+            resource_json.get("features"),
+            resource_json.get("benefits"),
+            resource_json.get("services"),
+        ]
+        features = next((value for value in feature_values if isinstance(value, list) and value), [])
+        includes = resource_json.get("includes")
+        if not features and includes:
+            features = [
+                item.strip()
+                for item in str(includes).split(",")
+                if item.strip()
+            ]
+        feature_text = "\n".join(f"- {feature}" for feature in features[:8])
+        product = resource_json.get("productName") or resource_json.get("title") or title
+        target = resource_json.get("target")
+        fee = resource_json.get("monthlyFee")
+        status = resource_json.get("status")
+        includes = resource_json.get("includes")
+        summary_parts = [f"The product is **{product}**."]
+        if target:
+            summary_parts.append(f"It is intended for **{target}**.")
+        if fee:
+            summary_parts.append(f"The monthly fee is **{fee}**.")
+        if status:
+            summary_parts.append(f"Status: **{status}**.")
+        if includes:
+            summary_parts.append(f"It includes **{includes}**.")
+        return "\n\n".join([
+            f"## {resource_json.get('title') or 'Product Sheet'}",
+            " ".join(summary_parts),
+            feature_text,
+        ]).strip()
+
+    if resource_type in {"security_notice", "insurance_policy"}:
+        return "\n\n".join([
+            f"## {title}",
+            resource_json.get("summary") or resource_json.get("description") or f"I found **{title}**.",
+            _business_resource_bullets(resource_json),
+        ]).strip()
+
+    if resource_json:
+        generic_summary = _format_generic_resource_summary(resource_json, limit=8)
+        if generic_summary:
+            return generic_summary
 
     return None
 
@@ -1967,6 +3288,33 @@ def _build_resource_direct_answer(
     resource_type = str(resource_json.get("resourceType") or "").lower()
     normalized_message = request.message.lower()
     currency = _extract_currency(file_text, extracted_fields)
+
+    if _is_account_details_request(request.message) and resource_type in {
+        "account_statement",
+        "account_certificate",
+        "rib_certificate",
+        "account_profile",
+        "account_summary",
+    }:
+        balance = (
+            resource_json.get("balance")
+            if resource_json.get("balance") is not None
+            else resource_json.get("closingBalance")
+        )
+        return "\n\n".join([
+            "I found account details in your available resources.",
+            _markdown_table([
+                ("Account", resource_json.get("accountId")),
+                ("Account number", resource_json.get("accountNumber")),
+                ("Holder", resource_json.get("holder") or resource_json.get("customerName")),
+                ("Type", resource_json.get("accountType") or resource_json.get("type")),
+                ("Balance", _format_money(balance, currency) if balance is not None else None),
+                ("Status", resource_json.get("status")),
+                ("Branch", resource_json.get("branch")),
+                ("Currency", resource_json.get("currency") or currency),
+                ("Period", resource_json.get("period")),
+            ]),
+        ])
 
     if "closing balance" in normalized_message:
         closing_balance = resource_json.get("closingBalance")
@@ -1988,12 +3336,47 @@ def _build_resource_direct_answer(
         remaining = _format_money(resource_json.get("remainingBalance"), resource_json.get("currency", "TND"))
         return f"Your next loan payment is due on **{due_date}**. The monthly payment is **{monthly_payment}**."
 
+    if resource_type in {"atb_connect_guide", "digital_banking_guide"} and _is_atb_connect_id_question(request.message):
+        required_id = resource_json.get("requiredId") or "not found"
+        return f"For ATB Connect activation, you need **{required_id}**."
+
+    if resource_type == "security_notice" and (
+        "recommend" in normalized_message
+        or "security" in normalized_message
+        or "protect" in normalized_message
+    ):
+        recommendations = (
+            resource_json.get("recommendations")
+            or resource_json.get("tips")
+            or resource_json.get("steps")
+            or resource_json.get("actions")
+        )
+        if isinstance(recommendations, list) and recommendations:
+            bullets = "\n".join(
+                f"- {_bold_value(item)}"
+                for item in recommendations[:6]
+                if str(item).strip()
+            )
+            if bullets:
+                return "\n\n".join([
+                    "The mobile banking security notice recommends:",
+                    bullets,
+                ])
+        summary = resource_json.get("summary") or resource_json.get("description")
+        if summary:
+            return f"The mobile banking security notice recommends: **{summary}**"
+
     if resource_type == "card_dispute" and ("status" in normalized_message or "dispute" in normalized_message):
         status = resource_json.get("status") or "not found"
-        dispute_id = resource_json.get("disputeId") or resource_json.get("resourceId") or "not found"
+        dispute_id = resource_json.get("disputeId") or resource_json.get("reference") or "not found"
         amount = _format_money(resource_json.get("amount"), resource_json.get("currency", "TND"))
         merchant = resource_json.get("merchant") or "not found"
         return f"Your card dispute **{dispute_id}** is **{status}**. It concerns {merchant} for {amount}."
+
+    if resource_type == "card_service_request" and (
+        "status" in normalized_message or "replacement" in normalized_message
+    ):
+        return _format_card_service_request(resource_json)
 
     if resource_type == "fees_notice" and ("fee" in normalized_message or "fees" in normalized_message):
         total = _format_money(resource_json.get("totalFees"), resource_json.get("currency", "TND"))
@@ -2009,15 +3392,10 @@ def _build_resource_direct_answer(
             f"| SMS fee | {sms} |"
         )
 
-    if resource_type == "appointment_confirmation" and (
+    if resource_type in {"appointment_confirmation", "card_pickup_appointment"} and (
         "appointment" in normalized_message or "branch" in normalized_message
     ):
-        status = resource_json.get("status") or "not found"
-        branch = resource_json.get("branch") or "not found"
-        date = resource_json.get("date") or "not found"
-        time = resource_json.get("time") or "not found"
-        advisor = resource_json.get("advisor") or "not found"
-        return f"Yes. You have a **{status.lower()}** branch appointment at **{branch}** on **{date}** at **{time}** with {advisor}."
+        return _format_appointment_resource(resource_json, resource_type)
 
     if resource_type == "rib_certificate" and "rib" in normalized_message:
         holder = resource_json.get("holder") or resource_json.get("customerName") or "not found"
@@ -2090,14 +3468,17 @@ def _build_file_summary_message(
 
     if document_type == "scanned_or_image_document":
         if request.resolvedResourceContext:
+            direct_answer = _build_resource_direct_answer(request, file_text, extracted_fields)
+            if direct_answer:
+                return direct_answer
+            resource_summary = _build_resource_summary(request, file_text, extracted_fields)
+            if resource_summary:
+                return resource_summary
             return (
                 "I found the resource, but I could not extract readable text "
                 "from the linked file."
             )
         return "I received the image, but I could not read enough text from it."
-
-    if not file_text:
-        return _build_unreadable_file_message(request, file_names)
 
     if request.resolvedResourceContext:
         direct_answer = _build_resource_direct_answer(request, file_text, extracted_fields)
@@ -2106,6 +3487,9 @@ def _build_file_summary_message(
         resource_summary = _build_resource_summary(request, file_text, extracted_fields)
         if resource_summary:
             return resource_summary
+
+    if not file_text:
+        return _build_unreadable_file_message(request, file_names)
 
     if document_type == "account_statement":
         return _build_account_statement_summary(file_text, extracted_fields)
@@ -2141,6 +3525,23 @@ def build_assistant_message(
         )
 
     missing_fields = missing_fields or []
+
+    first_missing = missing_fields[0] if missing_fields else None
+
+    if intent == "check_balance" and first_missing == "accountId":
+        return "I can show your account details. Which account would you like to check?"
+
+    if intent == "pay_bill" and first_missing == "provider":
+        return "I can help prepare the bill payment. Which provider is it for?"
+
+    if intent == "pay_bill" and first_missing == "sourceAccountId":
+        return "I can help prepare the bill payment. Which account should I use?"
+
+    if intent == "book_appointment" and first_missing == "branch":
+        return "I can book an appointment for you. Which branch would you prefer?"
+
+    if intent == "create_complaint" and first_missing == "category":
+        return "I can prepare a complaint. What type of issue is it?"
 
     if intent == "make_transfer":
         if "sourceAccountId" in missing_fields and "beneficiaryId" in missing_fields:
@@ -2180,6 +3581,168 @@ def build_assistant_message(
         )
 
     return "**Request understood**\n\nI can assist you with this banking action."
+
+
+def build_general_banking_answer(message: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", str(message or "").lower()).strip()
+
+    if re.search(r"\bwhat\s+is\s+(?:a\s+|an\s+|the\s+)?loan\b", normalized):
+        return (
+            "A **loan** is money a bank or lender provides that you agree to repay over time. "
+            "You usually repay the borrowed amount plus interest and any fees according to the loan contract."
+        )
+
+    if re.search(r"\bwhat\s+is\s+(?:a\s+|an\s+|the\s+)?rib\s+certificate\b", normalized):
+        return (
+            "A **RIB certificate** is a banking document that identifies a bank account. "
+            "It usually contains the account holder name, bank details, branch or account "
+            "information, and an account identifier such as a RIB or IBAN depending on the country."
+        )
+
+    if re.search(r"\bwhat\s+is\s+(?:a\s+|an\s+|the\s+)?current\s+account\b", normalized):
+        return (
+            "A **current account** is a day-to-day bank account used for regular money movement.\n\n"
+            "- It is usually used to receive salary or business income.\n"
+            "- It supports deposits, withdrawals, card payments, transfers, and bill payments.\n"
+            "- It may include a cheque book, debit card, and online banking access depending on the bank package.\n"
+            "- It is designed for frequent transactions rather than long-term saving."
+        )
+
+    if (
+        "difference between" in normalized
+        and "debit card" in normalized
+        and "credit card" in normalized
+    ):
+        return (
+            "A **debit card** spends money directly from your bank account, while a "
+            "**credit card** lets you borrow up to an approved limit and repay later.\n\n"
+            "| Card type | How it works | Main risk |\n"
+            "|---|---|---|\n"
+            "| Debit card | Uses your available account balance | Failed payment or overdraft if funds are insufficient |\n"
+            "| Credit card | Uses a credit limit that you repay later | Interest, fees, and debt if not repaid on time |"
+        )
+
+    if re.search(r"\bhow\b.*\bcredit\s+card\b.*\bwork\b", normalized):
+        return (
+            "A **credit card** lets you spend up to an approved credit limit and repay the bank later. "
+            "If you do not repay the full balance by the due date, interest and fees may apply."
+        )
+
+    if re.search(r"\blost\b.*\bcard\b|\bcard\b.*\blost\b", normalized):
+        return (
+            "If you lost your card, block it immediately in your banking app or by contacting the bank, then request a replacement. "
+            "Review recent transactions and report any payment you do not recognize."
+        )
+
+    if re.search(r"\bavoid\b.*\b(mobile\s+banking\s+)?scams?\b|\bscams?\b.*\bmobile\s+banking\b", normalized):
+        return (
+            "To avoid mobile banking scams, never share OTP or SMS codes, use only the official bank app or website, avoid suspicious links, "
+            "check payment details before confirming, and contact the bank quickly if something looks unusual."
+        )
+
+    if "interest rate" in normalized or "interest rates" in normalized:
+        return (
+            "An **interest rate** is the price of borrowing money or the return paid on savings. "
+            "For a loan, a higher rate usually means higher monthly payments and a higher total repayment cost."
+        )
+
+    if (
+        re.search(r"\bdocuments?\b.*\b(needed|required)\b.*\bloan\b", normalized)
+        or re.search(r"\bloan\b.*\bdocuments?\b", normalized)
+    ):
+        return (
+            "For a loan, banks usually ask for identification, proof of income, recent bank statements, employment or business details, "
+            "and documents related to the loan purpose. The exact list depends on the bank, loan type, and applicant profile."
+        )
+
+    if "eligible" in normalized and "bank" in normalized:
+        return (
+            "Banks usually decide eligibility by reviewing income stability, existing debts, repayment history, account activity, requested amount, "
+            "loan duration, and required documents. Final approval depends on the bank policy and risk checks."
+        )
+
+    if re.search(r"\bmiss\b.*\bbill\s+payment\b|\bbill\s+payment\b.*\bmiss\b", normalized):
+        return (
+            "If you miss a bill payment, the provider may charge a late fee, restrict the service, or mark the bill as overdue. "
+            "Pay it as soon as possible and contact the provider or bank if you need help."
+        )
+
+    if re.search(r"\bprepare\b.*\bbank\s+appointment\b|\bbank\s+appointment\b.*\bprepare\b", normalized):
+        return (
+            "To prepare for a bank appointment, bring valid identification, relevant account or application references, proof of income if needed, "
+            "and a short list of questions or documents you want reviewed."
+        )
+
+    if (
+        "protect" in normalized
+        and ("online banking" in normalized or "banking account" in normalized or "account" in normalized)
+    ):
+        return (
+            "To protect your online banking account:\n\n"
+            "1. Use a strong, unique password.\n"
+            "2. Keep OTP or SMS codes private.\n"
+            "3. Avoid logging in from shared or public devices.\n"
+            "4. Check the website or app address before entering credentials.\n"
+            "5. Enable alerts where available and report suspicious activity quickly."
+        )
+
+    return None
+
+
+def _is_general_natural_chat_request(request: AgentAnalyzeRequest) -> bool:
+    return bool(request.agentContext and request.agentContext.generalNaturalChat)
+
+
+def _is_resource_response_writer_request(request: AgentAnalyzeRequest) -> bool:
+    return bool(request.agentContext and request.agentContext.resourceResponseWriter)
+
+
+def _is_generic_capabilities_response(value: str | None) -> bool:
+    text = re.sub(r"\s+", " ", str(value or "").lower()).strip()
+    return (
+        "i can help with banking services" in text
+        or "i can assist you with banking services" in text
+    )
+
+
+def _build_general_natural_chat_result(
+    request: AgentAnalyzeRequest,
+    assistant_message: str | None = None,
+    *,
+    source: str = "rule_based",
+    confidence: float = 0.55,
+) -> dict:
+    fallback_answer = build_general_banking_answer(request.message)
+    if (
+        not _is_capabilities_question(request.message)
+        and _is_generic_capabilities_response(assistant_message)
+        and fallback_answer
+    ):
+        assistant_message = fallback_answer
+
+    return {
+        "source": source,
+        "language": detect_language(request.message),
+        "agentMode": "informational_answer",
+        "intent": "general_natural_chat",
+        "actionName": None,
+        "documentTypeDetected": None,
+        "confidence": confidence,
+        "missingFields": [],
+        "extractedFields": {},
+        "requiredTool": "none",
+        "toolInput": {
+            "modelMode": "text",
+            "resourceFound": False,
+        },
+        "assistantMessage": assistant_message
+        or fallback_answer
+        or (
+            build_assistant_message("unknown", None)
+            if _is_capabilities_question(request.message)
+            else "Please ask the banking question a little more specifically so I can answer it directly."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -2251,7 +3814,7 @@ def analyze_message_rule_based(request: AgentAnalyzeRequest) -> dict:
     language = detect_language(request.message)
     document_type = detect_document_type(request) if _has_document_context(request) else None
 
-    if document_type == "scanned_or_image_document":
+    if document_type == "scanned_or_image_document" and _has_uploaded_files(request):
         return analyze_uploaded_file(request)
 
     context_intent = _infer_intent_from_context(request)
@@ -2268,6 +3831,7 @@ def analyze_message_rule_based(request: AgentAnalyzeRequest) -> dict:
     action = find_available_action(intent, request.availableActions)
 
     if intent == "unknown" or action is None:
+        general_answer = build_general_banking_answer(request.message)
         return {
             "source": "rule_based",
             "language": language,
@@ -2280,7 +3844,7 @@ def analyze_message_rule_based(request: AgentAnalyzeRequest) -> dict:
             "extractedFields": {},
             "requiredTool": "none",
             "toolInput": {},
-            "assistantMessage": build_assistant_message(intent, action),
+            "assistantMessage": general_answer or build_assistant_message(intent, action),
         }
 
     extracted_fields = _contextual_fields_for_intent(intent, request)
@@ -2304,7 +3868,7 @@ def analyze_message_rule_based(request: AgentAnalyzeRequest) -> dict:
         "missingFields": missing_fields,
         "extractedFields": extracted_fields,
         "requiredTool": "connector_action",
-        "toolInput": _resource_tool_input(request),
+        "toolInput": _action_tool_input(request, intent, missing_fields),
         "assistantMessage": assistant_message,
     }
 
@@ -2389,7 +3953,7 @@ def _try_pending_action_continuation(request: AgentAnalyzeRequest) -> dict | Non
         "missingFields": missing_fields,
         "extractedFields": merged_fields,
         "requiredTool": "connector_action",
-        "toolInput": {},
+        "toolInput": _action_tool_input(request, pending.actionName, missing_fields),
         "assistantMessage": assistant_message,
     }
 
@@ -2505,7 +4069,7 @@ def _validate_ollama_result(
         "missingFields": missing_fields,
         "extractedFields": extracted_fields,
         "requiredTool": "connector_action",
-        "toolInput": _resource_tool_input(request),
+        "toolInput": _action_tool_input(request, intent, missing_fields),
         "assistantMessage": generated_message if missing_fields else (
             assistant_message or generated_message
         ),
@@ -2526,6 +4090,23 @@ def analyze_message(request: AgentAnalyzeRequest) -> dict:
       3. banking_action    — detected banking intent (Ollama or rule-based)
       4. informational_answer — default fallback
     """
+    if _is_resource_response_writer_request(request):
+        if settings.USE_OLLAMA:
+            try:
+                ollama_result = analyze_with_ollama(request)
+                validated_result = _validate_ollama_result(ollama_result, request)
+                return {
+                    **validated_result,
+                    "agentMode": "informational_answer",
+                    "intent": "informational_answer",
+                    "actionName": None,
+                    "requiredTool": "none",
+                }
+            except (OllamaServiceError, ValueError, TypeError, KeyError):
+                pass
+
+        return analyze_uploaded_file(request)
+
     # 1. File analysis
     if _is_file_analysis_request(request):
         return analyze_uploaded_file(request)
@@ -2543,6 +4124,22 @@ def analyze_message(request: AgentAnalyzeRequest) -> dict:
     continuation = _try_pending_action_continuation(request)
     if continuation is not None:
         return continuation
+
+    if _is_general_natural_chat_request(request):
+        if settings.USE_OLLAMA:
+            try:
+                ollama_result = analyze_with_ollama(request)
+                validated_result = _validate_ollama_result(ollama_result, request)
+                return _build_general_natural_chat_result(
+                    request,
+                    validated_result.get("assistantMessage"),
+                    source="ollama",
+                    confidence=validated_result.get("confidence", 0.65),
+                )
+            except (OllamaServiceError, ValueError, TypeError, KeyError):
+                pass
+
+        return _build_general_natural_chat_result(request)
 
     rule_based_result = analyze_message_rule_based(request)
 

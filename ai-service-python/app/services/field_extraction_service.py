@@ -32,6 +32,7 @@ PROVIDERS = {
     "sonede": "SONEDE",
     "ooredoo": "OOREDOO",
     "orange": "ORANGE",
+    "internet": "INTERNET",
     "tunisie telecom": "TELECOM",
     "telecom": "TELECOM",
     "tt": "TELECOM",
@@ -110,6 +111,14 @@ ACCOUNT_ALIASES = {
     "savings account": "acc_002",
     "saving account": "acc_002",
 }
+BRANCH_ALIASES = {
+    "tunis centre": "Tunis Centre",
+    "tunis center": "Tunis Centre",
+    "ariana": "Ariana",
+    "sfax": "Sfax",
+    "online appointment": "Online appointment",
+    "online": "Online appointment",
+}
 WEEKDAYS = {
     "monday": 0,
     "tuesday": 1,
@@ -186,6 +195,16 @@ def _extract_account_id(message: str) -> str | None:
             return account_id
 
     return None
+
+
+def _is_account_details_message(message: str) -> bool:
+    normalized = message.lower()
+    return bool(
+        re.search(r"\baccounts?\b.*\b(details?|information|info|summary|status)\b", normalized)
+        or re.search(r"\b(details?|information|info|summary|status)\b.*\baccounts?\b", normalized)
+        or re.search(r"\b(show|view|give|get|display|list)\b.*\bmy\s+accounts?\b", normalized)
+        or re.search(r"\b(show|view|give|get|display|list)\b.*\baccounts?\b", normalized)
+    )
 
 
 def _extract_amount(message: str) -> int | float | None:
@@ -289,6 +308,8 @@ def _matches_any(normalized: str, patterns: list[str]) -> bool:
 
 def _extract_complaint_category(message: str) -> str | None:
     normalized = message.lower()
+    if normalized.strip(" .!?") in {"other", "other issue"}:
+        return "Other"
 
     labeled_category = re.search(
         r"\b(?:complaint\s+)?category\s*[:=-]\s*([^\n\r:=-]{2,60})",
@@ -329,6 +350,14 @@ def _clean_description(value: str) -> str | None:
 
 def _extract_explicit_complaint_description(message: str) -> str | None:
     sanitized = _complaint_extraction_text(message)
+    normalized_sanitized = re.sub(r"\s+", " ", sanitized.lower()).strip(" .!?")
+
+    if re.fullmatch(
+        r"(?:please\s+)?(?:(?:i\s+)?(?:want|would like|need)\s+to\s+)?"
+        r"(?:make|create|open|submit|file|raise)?\s*(?:a\s+)?complaint",
+        normalized_sanitized,
+    ):
+        return None
 
     labeled_description = re.search(
         r"\b(?:problem\s+description|description|details?)\s*[:=-]\s*(.+?)(?:\n[A-Za-z ]{2,30}\s*[:=-]|\Z)",
@@ -513,6 +542,11 @@ def _extract_due_date(message: str) -> str | None:
 
 
 def _extract_branch(message: str) -> str | None:
+    normalized = re.sub(r"\s+", " ", message.lower()).strip(" .!?")
+    for alias, branch in BRANCH_ALIASES.items():
+        if normalized == alias or alias in normalized:
+            return branch
+
     patterns = [
         r"\b(?:branch|agency|agence)\s*[:=-]\s*([^\n:=-]{2,40})",
         r"\b(?:at|visit|in)\s+(?:the\s+)?([A-Za-zÀ-ÿ\s'-]{2,40})\s+branch\b",
@@ -546,6 +580,8 @@ def extract_fields(intent: str, message: str) -> dict[str, Any]:
 
         if account_id:
             fields["accountId"] = account_id
+        if _is_account_details_message(message):
+            fields["_accountDetailsRequested"] = True
 
     if intent == "make_transfer":
         amount = _extract_amount(message)

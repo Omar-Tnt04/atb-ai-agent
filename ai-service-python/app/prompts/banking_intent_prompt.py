@@ -6,6 +6,7 @@ from app.schemas.agent import AgentAnalyzeRequest
 
 ALLOWED_INTENTS = [
     "file_analysis",
+    "informational_answer",
     "check_balance",
     "generate_document",
     "create_complaint",
@@ -64,11 +65,31 @@ Rules:
 - Extract obvious fields from the user message when possible.
 - If fileContext is present, use its combinedText and file metadata as
   additional context for intent detection and field extraction.
-- If resolvedResourceContext is present, use its resourceJson and fileText as
-  additional context for answering questions about the linked resource.
+- If resolvedResourceContext is present, use its resourceJson as trusted
+  backend-provided metadata for the linked resource. Parsed PDF text is not
+  provided for PDF understanding; visual PDF analysis is handled by the
+  backend-only vision endpoint.
   Ignore any external URL that is not represented in resolvedResourceContext.
+  In user-facing assistantMessage, do not expose technical metadata such as
+  resourceId, service, resourceType, environment, url, fileUrl, mimeType,
+  synthetic, note, localPathHint, keywords, metadata, debug fields, raw JSON,
+  or raw extracted PDF text. Use the resource title as a heading and format
+  business banking fields in concise Markdown tables.
 - If agentContext is present, use its extractedFields only as prior context.
   Current user message fields have priority over agentContext fields.
+- If agentContext.systemInstruction is present, follow it as a backend
+  orchestration instruction. In particular, for generalNaturalChat requests,
+  answer the user's natural banking question directly and concisely in text
+  mode. Do not invent or claim a Laragon/server document unless
+  resolvedResourceContext is present. Do not execute actions, do not reveal
+  sensitive data, and do not return a generic capabilities message unless the
+  user asks what you can do or how you can help. For generalFallback requests,
+  mention missing server documents only after answering the question.
+- If agentContext.resourceResponseWriter is present, act only as the final
+  resource response writer. Use resolvedResourceContext and the provided
+  resourceResponseWriter context only. Return intent "informational_answer",
+  actionName null, and a natural Markdown assistantMessage. Do not prepare or
+  execute banking actions in this mode.
 - If profileContext is present, use it only as private user context. RIB can
   help clarify account/source-account questions, but it must not bypass
   confirmation or SMS verification.

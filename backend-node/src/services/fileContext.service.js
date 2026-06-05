@@ -1,6 +1,5 @@
 const fs = require('fs/promises');
 const path = require('path');
-const { PDFParse } = require('pdf-parse');
 const sharp = require('sharp');
 const { PSM, createWorker } = require('tesseract.js');
 
@@ -10,8 +9,6 @@ const OCR_ENABLED = process.env.OCR_ENABLED !== 'false';
 const OCR_LANGUAGES = process.env.OCR_LANGUAGES || 'eng+fra';
 const OCR_MIN_READABLE_CHARS = Number(process.env.OCR_MIN_READABLE_CHARS || 8);
 const OCR_IMAGE_MAX_WIDTH = Number(process.env.OCR_IMAGE_MAX_WIDTH || 1800);
-const OCR_PDF_RENDER_WIDTH = Number(process.env.OCR_PDF_RENDER_WIDTH || 1800);
-const OCR_MAX_PDF_PAGES = Number(process.env.OCR_MAX_PDF_PAGES || 3);
 const OCR_IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp']);
 const OCR_IMAGE_MIME_TYPES = new Set([
   'image/png',
@@ -125,32 +122,6 @@ const extractJsonFile = async (filePath) => {
   }
 };
 
-const extractPdfFile = async (filePath) => {
-  const buffer = await fs.readFile(filePath);
-  const parser = new PDFParse({ data: buffer });
-
-  try {
-    const result = await parser.getText();
-    const extractedText = normalizeText(truncate(result.text || '', TEXT_PREVIEW_LIMIT));
-
-    if (hasReadableText(extractedText)) {
-      return {
-        extractedText,
-        extractionStatus: 'extracted',
-      };
-    }
-
-    if (!OCR_ENABLED) {
-      return buildOcrDisabledResult();
-    }
-
-    const ocrText = await extractScannedPdfWithOcr(parser);
-    return buildOcrExtractionResult(ocrText);
-  } finally {
-    await parser.destroy();
-  }
-};
-
 const getOcrWorker = async () => {
   if (!ocrWorkerPromise) {
     ocrWorkerPromise = createWorker(OCR_LANGUAGES).then(async (worker) => {
@@ -212,28 +183,6 @@ const extractImageFile = async (filePath) => {
   return buildOcrExtractionResult(ocrText);
 };
 
-const extractScannedPdfWithOcr = async (parser) => {
-  const screenshotResult = await parser.getScreenshot({
-    desiredWidth: OCR_PDF_RENDER_WIDTH,
-    first: OCR_MAX_PDF_PAGES,
-    imageBuffer: true,
-    imageDataUrl: false,
-  });
-
-  const pageTexts = [];
-
-  for (const page of screenshotResult.pages || []) {
-    const pageBuffer = Buffer.from(page.data || []);
-    const pageText = await recognizeImageBuffer(pageBuffer);
-
-    if (pageText) {
-      pageTexts.push(`Page ${page.pageNumber}:\n${pageText}`);
-    }
-  }
-
-  return normalizeText(pageTexts.join('\n\n'));
-};
-
 const extractSingleFile = async (file) => {
   const fileKind = getFileKind(file);
   const isVisualInput = fileKind === 'image' || fileKind === 'pdf';
@@ -266,13 +215,11 @@ const extractSingleFile = async (file) => {
     }
 
     if (fileKind === 'pdf') {
-      const result = await extractPdfFile(file.path);
       return {
         ...base,
-        ...result,
-        isOcrDerived: result.extractionStatus === 'ocr_extracted',
-        isScannedOrImageBased: result.extractionStatus === 'ocr_extracted' ||
-          result.extractionStatus === 'ocr_empty',
+        extractionStatus: 'vision_pending',
+        isOcrDerived: false,
+        isScannedOrImageBased: true,
       };
     }
 

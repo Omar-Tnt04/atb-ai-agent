@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
+    "test:agent-api": "node tests/agentApi.test.mjs",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0"
   },

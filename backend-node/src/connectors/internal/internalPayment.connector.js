@@ -12,20 +12,25 @@ const getClientAccount = (user, accountId) =>
     (account) => account.id === accountId && account.userId === user.id,
   );
 
-// Resolves the user context (bill, account) locally, then routes the actual
-// payment through the internal demo payment service over HTTP.
+const hasValue = (value) =>
+  value !== undefined &&
+  value !== null &&
+  !(typeof value === 'string' && value.trim() === '');
+
+const getPreparedBill = (payload = {}) => ({
+  provider: payload._preparedBill?.provider || payload.provider,
+  billReference: payload._preparedBill?.billReference || payload.billReference,
+  amount: payload._preparedBill?.amount ?? payload.amount,
+  currency: payload._preparedBill?.currency || payload.currency || 'TND',
+  status: payload._preparedBill?.status || 'unpaid',
+});
+
+// Uses the prepared bill snapshot from confirmation, then routes the payment
+// through the internal demo payment service over HTTP.
 const executeBillPayment = async ({ user, payload }) => {
-  const bill = mockBills.find(
-    (mockBill) =>
-      mockBill.billReference === payload.billReference &&
-      mockBill.userId === user.id,
-  );
+  const preparedBill = getPreparedBill(payload);
 
-  if (!bill) {
-    return { success: false, status: 'not_found', message: 'Bill not found' };
-  }
-
-  if (bill.status === 'paid') {
+  if (preparedBill.status === 'paid') {
     return {
       success: false,
       status: 'already_paid',
@@ -43,7 +48,29 @@ const executeBillPayment = async ({ user, payload }) => {
     };
   }
 
-  const totalAmount = Number((bill.amount + BILL_PAYMENT_FEES).toFixed(3));
+  if (
+    !hasValue(preparedBill.provider) ||
+    !hasValue(preparedBill.billReference) ||
+    !hasValue(preparedBill.amount)
+  ) {
+    return {
+      success: false,
+      status: 'missing_fields',
+      message: 'Prepared bill payment details are incomplete',
+    };
+  }
+
+  const billAmount = Number(preparedBill.amount);
+
+  if (!Number.isFinite(billAmount) || billAmount <= 0) {
+    return {
+      success: false,
+      status: 'invalid_amount',
+      message: 'Bill amount must be a positive number',
+    };
+  }
+
+  const totalAmount = Number((billAmount + BILL_PAYMENT_FEES).toFixed(3));
 
   if (sourceAccount.balance < totalAmount) {
     return {
@@ -60,10 +87,10 @@ const executeBillPayment = async ({ user, payload }) => {
     data: {
       userId: user.id,
       sourceAccountId: sourceAccount.id,
-      provider: bill.provider,
-      billReference: bill.billReference,
-      amount: bill.amount,
-      currency: bill.currency,
+      provider: preparedBill.provider,
+      billReference: preparedBill.billReference,
+      amount: billAmount,
+      currency: preparedBill.currency,
     },
   });
 
@@ -72,8 +99,15 @@ const executeBillPayment = async ({ user, payload }) => {
   }
 
   sourceAccount.balance = Number((sourceAccount.balance - totalAmount).toFixed(3));
-  bill.status = 'paid';
-  bill.paidAt = new Date().toISOString();
+
+  const localBill = Number.isInteger(payload._mockBillIndex)
+    ? mockBills[payload._mockBillIndex]
+    : null;
+
+  if (localBill?.userId === user.id) {
+    localBill.status = 'paid';
+    localBill.paidAt = new Date().toISOString();
+  }
 
   return {
     success: true,

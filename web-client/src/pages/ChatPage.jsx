@@ -98,7 +98,11 @@ const ACTIVITY_LABELS = {
   understanding: 'Thinking',
 };
 
-const EMPTY_AGENT_CONTEXT = { extractedFields: {}, suggestedAction: null };
+const EMPTY_AGENT_CONTEXT = {
+  extractedFields: {},
+  suggestedAction: null,
+  pendingAction: null,
+};
 const SUPPORTED_UPLOAD_EXTENSIONS = new Set([
   'pdf',
   'png',
@@ -122,8 +126,41 @@ const QUICK_ACTIONS = [
   { label: 'Book appointment', prompt: 'Book an appointment' },
 ];
 
+const DEFAULT_BACKEND_API_URL = 'http://localhost:5000';
+
+const getBackendOrigin = () => {
+  try {
+    return new URL(
+      import.meta.env.VITE_API_URL || DEFAULT_BACKEND_API_URL,
+      window.location.origin,
+    ).origin;
+  } catch {
+    return new URL(DEFAULT_BACKEND_API_URL).origin;
+  }
+};
+
+const toSafeBackendUrl = (value) => {
+  if (!value || typeof value !== 'string') return null;
+
+  try {
+    if (/^https?:\/\//i.test(value)) {
+      const parsed = new URL(value);
+      return parsed.origin === getBackendOrigin() ? parsed.href : null;
+    }
+
+    if (value.startsWith('/')) {
+      return `${getBackendOrigin()}${value}`;
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+};
+
 // Infers which banking action a remembered field set points to.
 const inferActionFromFields = (fields = {}) => {
+  if (fields._visionNoAction === true) return null;
   if (fields.billReference || fields.provider) return 'pay_bill';
   if (fields.beneficiaryId) return 'make_transfer';
   if (fields.documentType || fields.period) return 'generate_document';
@@ -158,8 +195,12 @@ const deriveAgentContext = (previousContext, response) => {
     inferActionFromFields(mergedFields) ||
     previousContext?.suggestedAction ||
     null;
+  const pendingAction =
+    response?.status === 'missing_fields'
+      ? response?.data?.pendingAction || previousContext?.pendingAction || null
+      : null;
 
-  return { extractedFields: mergedFields, suggestedAction };
+  return { extractedFields: mergedFields, suggestedAction, pendingAction };
 };
 
 const formatMoney = (amount, currency = 'TND') => {
@@ -235,21 +276,120 @@ const buildCompletionText = (_executionMode, data = {}) => {
 const buildAssistantText = (response) =>
   response.assistantMessage || 'I reviewed your request.';
 
-// The only inline controls left on assistant messages are the small
-// Confirm / Cancel buttons for a prepared action. Missing fields are asked for
-// in natural language, never as option chips.
+const firstArray = (values) =>
+  values.find((value) => Array.isArray(value) && value.length) || [];
+
+const getQuickReplyUrl = (reply = {}) =>
+  reply.url || reply.downloadUrl || reply.fileUrl || '';
+
+const isDownloadLikeQuickReply = (reply = {}) => {
+  const actionType = reply.action || reply.type || '';
+  const label = String(reply.label || reply.title || reply.text || '').toLowerCase();
+  const url = String(getQuickReplyUrl(reply) || '').toLowerCase();
+
+  return (
+    ['download', 'open_url'].includes(actionType) &&
+    (
+      label.includes('download pdf') ||
+      label.includes('download document') ||
+      label.includes('pdf') ||
+      url.includes('/resources/download/') ||
+      url.split(/[?#]/)[0].endsWith('.pdf')
+    )
+  );
+};
+
+const getQuickReplyKey = (reply = {}) => {
+  if (reply.id) return `id:${reply.id}`;
+
+  const actionType = reply.action || reply.type || '';
+  const url = String(getQuickReplyUrl(reply) || '').trim();
+
+  if (url) {
+    return `${isDownloadLikeQuickReply(reply) ? 'download' : actionType || 'url'}:${url}`;
+  }
+
+  return `${actionType}:${reply.label || ''}:${reply.value || reply.prompt || ''}`;
+};
+
+const dedupeQuickReplies = (replies = []) => {
+  const seen = new Set();
+
+  return replies.filter((reply) => {
+    if (!reply || !reply.label) return false;
+    const key = getQuickReplyKey(reply);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const normalizeQuickReply = (reply, index) => {
+  if (!reply) return null;
+  if (typeof reply === 'string') {
+    return { label: reply, action: 'prompt', prompt: reply };
+  }
+
+  const rawUrl = reply.url || reply.downloadUrl || reply.fileUrl || null;
+  const safeUrl = toSafeBackendUrl(rawUrl);
+  const normalizedAction = reply.action || reply.type || (safeUrl ? 'open_url' : 'prompt');
+
+  // The browser may only open backend-approved URLs. Laragon, Python AI, and
+  // model endpoints must stay behind the backend orchestration boundary.
+  if (['open_url', 'download'].includes(normalizedAction) && !safeUrl) {
+    return null;
+  }
+
+  const value = reply.value || reply.id || null;
+  const label =
+    reply.label ||
+    reply.title ||
+    reply.text ||
+    reply.name ||
+    value ||
+    `Option ${index + 1}`;
+
+  return {
+    ...reply,
+    label,
+    value,
+    action: normalizedAction,
+    prompt: reply.prompt || reply.message || label,
+    url: safeUrl,
+  };
+};
+
 const buildAssistantQuickReplies = (response) => {
-  const resourceActions = response?.data?.ai?.toolInput?.quickActions || [];
+  const resourceActions = firstArray([
+    response?.data?.ai?.toolInput?.quickActions,
+    response?.data?.ai?.toolInput?.suggestedOptions,
+    response?.data?.ai?.toolInput?.options,
+    response?.data?.ai?.quickActions,
+    response?.data?.ai?.suggestedOptions,
+    response?.data?.ai?.options,
+    response?.data?.toolInput?.quickActions,
+    response?.data?.toolInput?.suggestedOptions,
+    response?.data?.toolInput?.options,
+    response?.data?.quickActions,
+    response?.data?.suggestedOptions,
+    response?.data?.options,
+    response?.quickActions,
+    response?.suggestedOptions,
+    response?.options,
+  ])
+    .map(normalizeQuickReply)
+    .filter(Boolean);
+  const quickReplies = dedupeQuickReplies(resourceActions);
 
   if (response.status === 'action_prepared') {
     return [
       { label: 'Confirm', action: 'continue' },
       { label: 'Cancel', action: 'cancel' },
-      ...resourceActions.filter((action) => action.action === 'open_url').slice(0, 1),
+      ...quickReplies.filter((action) => action.action === 'open_url').slice(0, 1),
     ];
   }
 
-  return resourceActions;
+  return quickReplies;
 };
 
 const shouldAppendAssistantMessage = () => true;
@@ -632,7 +772,7 @@ function ChatPage() {
     }
 
     if (response.status === 'missing_fields') {
-      const nextPendingFieldAction = {
+      const nextPendingFieldAction = response.data?.pendingAction || {
         actionName: response.data?.ai?.actionName || response.data?.actionName || null,
         missingFields: response.data?.missingFields || [],
         collectedFields: response.data?.finalPayload || {},
@@ -734,9 +874,16 @@ function ChatPage() {
     if (response.status === 'sms_required') {
       appendAssistantMessage({
         text: response.data?.maskedPhoneNumber
-          ? `Enter the SMS code sent to ${response.data.maskedPhoneNumber}.`
-          : 'Enter the SMS code to continue.',
+          ? `For your security, I sent an SMS code to ${response.data.maskedPhoneNumber}.`
+          : 'For your security, I sent an SMS code.',
         status: response.status,
+        smsChallenge: response.data?.confirmationId
+          ? {
+              confirmationId: response.data.confirmationId,
+              actionName: response.data.actionName,
+              finalPayload: response.data.finalPayload,
+            }
+          : null,
       });
       setPendingAction(null);
       setPendingConfirmation(null);
@@ -814,6 +961,17 @@ function ChatPage() {
 
     const userMessage =
       draftMessage.trim() || 'Please review the uploaded file attachments.';
+
+    if (
+      pendingSms?.confirmationId &&
+      selectedFiles.length === 0 &&
+      /^\d{4,8}$/.test(userMessage)
+    ) {
+      setMessage('');
+      await handleVerifyAndExecute(userMessage);
+      return;
+    }
+
     const filesToSend = selectedFiles;
     const attachments = buildFileAttachments(filesToSend);
 
@@ -849,7 +1007,7 @@ function ChatPage() {
     const outgoingAgentContext = {
       ...agentContext,
       extractedFields: stripPrivateResourceFields(agentContext?.extractedFields || {}),
-      pendingAction: pendingFieldAction,
+      pendingAction: pendingFieldAction || agentContext?.pendingAction || null,
     };
 
     try {
@@ -981,10 +1139,12 @@ function ChatPage() {
     }
   };
 
-  const handleVerifyAndExecute = async () => {
+  const handleVerifyAndExecute = async (codeOverride = smsCode) => {
     if (!pendingSms || actionLoadingText) return;
 
-    if (!smsCode.trim()) {
+    const code = String(codeOverride || '').trim();
+
+    if (!code) {
       setSmsError('Please enter the SMS code.');
       updateThreadMetadata({ smsError: 'Please enter the SMS code.' });
       return;
@@ -997,7 +1157,7 @@ function ChatPage() {
     try {
       const response = await verifyAndExecuteAction({
         confirmationId: pendingSms.confirmationId,
-        code: smsCode.trim(),
+        code,
         token,
       });
 
@@ -1070,8 +1230,26 @@ function ChatPage() {
   const handleMessageQuickReply = (reply) => {
     if (!reply || isSending || actionLoadingText) return;
 
-    if (reply.action === 'open_url' && reply.url) {
-      window.open(reply.url, '_blank', 'noopener,noreferrer');
+    if (reply.action === 'update_sms_code') {
+      setSmsCode(String(reply.code || '').replace(/\D/g, '').slice(0, 8));
+      setSmsError('');
+      updateThreadMetadata({
+        smsCode: String(reply.code || '').replace(/\D/g, '').slice(0, 8),
+        smsError: '',
+      });
+      return;
+    }
+
+    if (reply.action === 'verify_sms') {
+      handleVerifyAndExecute(reply.code);
+      return;
+    }
+
+    if (['open_url', 'download'].includes(reply.action) && reply.url) {
+      const safeUrl = toSafeBackendUrl(reply.url);
+      if (safeUrl) {
+        window.open(safeUrl, '_blank', 'noopener,noreferrer');
+      }
       return;
     }
 
@@ -1229,52 +1407,25 @@ function ChatPage() {
                   <ChatMessage
                     key={chatMessage.id}
                     formatStatus={formatStatus}
-                    message={chatMessage}
+                    message={{
+                      ...chatMessage,
+                      smsChallenge:
+                        chatMessage.smsChallenge &&
+                        pendingSms?.confirmationId === chatMessage.smsChallenge.confirmationId
+                          ? {
+                              ...chatMessage.smsChallenge,
+                              code: smsCode,
+                              error: smsError,
+                              disabled: Boolean(actionLoadingText),
+                            }
+                          : null,
+                    }}
                     onQuickReply={handleMessageQuickReply}
                     profile={profile}
                     statusTone={statusTone}
                     user={user}
                   />
                 ))}
-
-                {/* SMS verification card */}
-                {pendingSms ? (
-                  <InlineAssistantPanel className="sms-card">
-                    <label className="sms-code-field">
-                      SMS code
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={smsCode}
-                        placeholder="123456"
-                        maxLength={6}
-                        onChange={(event) => {
-                          setSmsCode(event.target.value);
-                          updateThreadMetadata({ smsCode: event.target.value });
-                        }}
-                        disabled={Boolean(actionLoadingText)}
-                      />
-                    </label>
-                    {smsError ? <p className="error-text">{smsError}</p> : null}
-                    <div className="action-button-row">
-                      <Button
-                        type="button"
-                        onClick={handleVerifyAndExecute}
-                        disabled={Boolean(actionLoadingText)}
-                      >
-                        Verify
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={handleCancelAction}
-                        disabled={Boolean(actionLoadingText)}
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </InlineAssistantPanel>
-                ) : null}
 
                 {/* Generated file card */}
                 {pendingGeneratedFile ? (

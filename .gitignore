@@ -1,13 +1,30 @@
-﻿node_modules/
+﻿# runtime/debug outputs
+logs/
+benchmark_results/
+*.log
+
+# local env
 .env
-.env.local
-dist/
-build/
-uploads/
+.env.*
+!.env.example
+backend-node/.env
+ai-service-python/.env
+web-client/.env
+widget-agent/.env
+
+# generated/local Laragon test data
+resources/
 backend-node/uploads/
-__pycache__/
-*.pyc
+
+# local editor / Codex
+.codex/
+*.code-workspace
+
+# dependencies / build
+node_modules/
 venv/
 .venv/
-.DS_Store
-*.traineddata
+__pycache__/
+*.pyc
+dist/
+build/

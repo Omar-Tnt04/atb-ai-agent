@@ -91,6 +91,14 @@ const buildSummary = (action, payload, user) => {
       summary.push(`Amount: ${formatAmount(payload.amount, payload.currency)}`);
     }
 
+    if (payload.dueDate) {
+      summary.push(`Due date: ${payload.dueDate}`);
+    }
+
+    if (payload.status) {
+      summary.push(`Status: ${payload.status}`);
+    }
+
     if (payload.sourceAccountId) {
       summary.push(`Account: ${getMaskedAccountLabel(payload.sourceAccountId, user)}`);
     }

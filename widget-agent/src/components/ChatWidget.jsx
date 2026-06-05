@@ -10,6 +10,7 @@ import {
   openDownloadUrl,
   sendAgentMessage,
   stripPrivateResourceFields,
+  verifyAndExecuteAgentAction,
 } from '../services/agentApi.js';
 import MessageBubble from './MessageBubble.jsx';
 import TypingIndicator from './TypingIndicator.jsx';
@@ -21,16 +22,13 @@ const UI_TEXT = {
   placeholder: 'Write your message...',
   fallback: 'I reviewed your request.',
   confirmContinue: 'Please confirm to continue.',
-  smsSent: 'Enter the SMS code sent to',
-  smsContinue: 'Enter the SMS code to continue.',
+  smsSentPrefix: 'For your security, I sent an SMS code to',
+  smsContinue: 'For your security, I sent an SMS code.',
   highRiskBlocked: 'This action requires SMS verification before execution.',
   actionCancelled: 'Action cancelled.',
   confirm: 'Confirm',
   cancel: 'Cancel',
-  attachment: 'Add an attachment',
   send: 'Send message',
-  maximize: 'Maximize panel',
-  reduce: 'Reduce panel',
   close: 'Close widget',
   openLauncher: 'Open ATB Assistant',
   closeLauncher: 'Close ATB Assistant',
@@ -180,26 +178,10 @@ const isProceedCommand = (text) =>
     'ok do it',
   ].includes(normalizedCommand(text));
 
-function MaximizeIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M8 4H4v4h2V6h2V4Zm8 0v2h2v2h2V4h-4ZM6 16H4v4h4v-2H6v-2Zm12 2h-2v2h4v-4h-2v2Z" />
-    </svg>
-  );
-}
-
 function CloseIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="m7.4 6 10.6 10.6-1.4 1.4L6 7.4 7.4 6Zm10.6 1.4L7.4 18 6 16.6 16.6 6 18 7.4Z" />
-    </svg>
-  );
-}
-
-function AttachmentIcon() {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-      <path d="M17.8 6.2a4.2 4.2 0 0 0-5.9 0L5.7 12.4a3 3 0 0 0 4.2 4.2l6.1-6.1-1.4-1.4-6.1 6.1a1 1 0 0 1-1.4-1.4l6.2-6.2a2.2 2.2 0 0 1 3.1 3.1l-6.3 6.3a4.7 4.7 0 0 1-6.6-6.6l5.7-5.7-1.4-1.4-5.7 5.7a6.7 6.7 0 0 0 9.5 9.5l6.3-6.3a4.2 4.2 0 0 0-.1-6Z" />
     </svg>
   );
 }
@@ -215,7 +197,6 @@ function SendIcon() {
 function ChatWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
   const [hasOpened, setHasOpened] = useState(false);
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
@@ -224,12 +205,19 @@ function ChatWidget() {
   const [pendingAction, setPendingAction] = useState(null);
   const [pendingConfirmation, setPendingConfirmation] = useState(null);
   const [pendingSms, setPendingSms] = useState(null);
+  const [smsCode, setSmsCode] = useState('');
+  const [smsError, setSmsError] = useState('');
   const [pendingFieldAction, setPendingFieldAction] = useState(null);
   const conversationId = useMemo(() => createId('conversation'), []);
   const inputRef = useRef(null);
   const transcriptRef = useRef(null);
   const closeTimerRef = useRef(null);
+  const launcherDragRef = useRef(null);
+  const suppressLauncherClickRef = useRef(false);
   const text = UI_TEXT;
+  const isEmbeddedWidget =
+    typeof document !== 'undefined' &&
+    document.documentElement.classList.contains('widget-embedded-document');
 
   useEffect(() => {
     if (!transcriptRef.current) return;
@@ -253,11 +241,45 @@ function ChatWidget() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isEmbeddedWidget || window.parent === window) {
+      return;
+    }
+
+    window.parent.postMessage(isOpen ? 'ATB_WIDGET_OPEN' : 'ATB_WIDGET_CLOSED', '*');
+  }, [isEmbeddedWidget, isOpen]);
+
+  useEffect(() => {
+    if (!isEmbeddedWidget) {
+      return;
+    }
+
+    const handleLayoutMessage = (event) => {
+      const message = event.data || {};
+
+      if (message.type !== 'ATB_WIDGET_LAYOUT') {
+        return;
+      }
+
+      const root = document.documentElement;
+      root.style.setProperty('--embed-launcher-left', `${message.launcherLeft}px`);
+      root.style.setProperty('--embed-launcher-top', `${message.launcherTop}px`);
+      root.style.setProperty('--embed-panel-left', `${message.panelLeft}px`);
+      root.style.setProperty('--embed-panel-top', `${message.panelTop}px`);
+      root.style.setProperty('--embed-panel-width', `${message.panelWidth}px`);
+      root.style.setProperty('--embed-panel-height', `${message.panelHeight}px`);
+    };
+
+    window.addEventListener('message', handleLayoutMessage);
+    return () => window.removeEventListener('message', handleLayoutMessage);
+  }, [isEmbeddedWidget]);
+
   const appendAssistantMessage = ({
     text,
     quickActions = [],
     isError = false,
     actionContext = null,
+    smsChallenge = null,
   }) => {
     setMessages((currentMessages) => [
       ...clearMessageActions(currentMessages),
@@ -265,6 +287,7 @@ function ChatWidget() {
         quickActions,
         isError,
         actionContext,
+        smsChallenge,
       }),
     ]);
   };
@@ -280,6 +303,8 @@ function ChatWidget() {
     setPendingAction(null);
     setPendingConfirmation(null);
     setPendingSms(null);
+    setSmsCode('');
+    setSmsError('');
   };
 
   const applyChatResponseState = (response) => {
@@ -290,19 +315,24 @@ function ChatWidget() {
       setPendingAction(raw.data?.preparation || null);
       setPendingConfirmation(null);
       setPendingSms(null);
+      setSmsCode('');
+      setSmsError('');
       setPendingFieldAction(null);
       return;
     }
 
     if (raw.status === 'missing_fields') {
-      setPendingAction(null);
-      setPendingConfirmation(null);
-      setPendingSms(null);
-      setPendingFieldAction({
+      const nextPendingFieldAction = raw.data?.pendingAction || {
         actionName: raw.data?.ai?.actionName || raw.data?.actionName || null,
         missingFields: raw.data?.missingFields || [],
         collectedFields: raw.data?.finalPayload || {},
-      });
+      };
+      setPendingAction(null);
+      setPendingConfirmation(null);
+      setPendingSms(null);
+      setSmsCode('');
+      setSmsError('');
+      setPendingFieldAction(nextPendingFieldAction);
       return;
     }
 
@@ -343,6 +373,8 @@ function ChatWidget() {
       setPendingAction(null);
       setPendingConfirmation(raw.data || null);
       setPendingSms(null);
+      setSmsCode('');
+      setSmsError('');
       appendAssistantMessage({
         text: text.confirmContinue,
         quickActions: [
@@ -358,11 +390,19 @@ function ChatWidget() {
       setPendingAction(null);
       setPendingConfirmation(null);
       setPendingSms(raw.data || null);
+      setSmsCode('');
+      setSmsError('');
       appendAssistantMessage({
         text: raw.data?.maskedPhoneNumber
-          ? `${text.smsSent} ${raw.data.maskedPhoneNumber}.`
+          ? `${text.smsSentPrefix} ${raw.data.maskedPhoneNumber}.`
           : text.smsContinue,
-        quickActions: [{ label: text.cancel, action: 'cancel' }],
+        smsChallenge: raw.data?.confirmationId
+          ? {
+              confirmationId: raw.data.confirmationId,
+              actionName: raw.data.actionName,
+              finalPayload: raw.data.finalPayload,
+            }
+          : null,
         actionContext: response.actionContext,
       });
       return;
@@ -409,7 +449,6 @@ function ChatWidget() {
     closeTimerRef.current = window.setTimeout(() => {
       setIsOpen(false);
       setIsClosing(false);
-      setIsExpanded(false);
       closeTimerRef.current = null;
     }, 210);
   };
@@ -491,10 +530,50 @@ function ChatWidget() {
       setPendingAction(null);
       setPendingConfirmation(null);
       setPendingSms(null);
+      setSmsCode('');
+      setSmsError('');
       setPendingFieldAction(null);
       appendAssistantMessage({ text: text.actionCancelled });
     } catch (error) {
       appendErrorMessage(error);
+    } finally {
+      setIsTyping(false);
+    }
+  };
+
+  const getSmsErrorMessage = (error) => {
+    const status = error?.data?.status;
+    const attemptsRemaining = error?.data?.data?.attemptsRemaining;
+
+    if (status === 'sms_invalid' && attemptsRemaining !== undefined) {
+      return `Invalid SMS code. Attempts remaining: ${attemptsRemaining}.`;
+    }
+
+    return error?.message || getAgentErrorMessage(error);
+  };
+
+  const handleSmsVerification = async (codeOverride = smsCode) => {
+    const code = String(codeOverride || '').trim();
+
+    if (!pendingSms?.confirmationId || isTyping) return;
+
+    if (!code) {
+      setSmsError('Please enter the SMS code.');
+      return;
+    }
+
+    setSmsError('');
+    setIsTyping(true);
+
+    try {
+      const response = await verifyAndExecuteAgentAction(
+        pendingSms.confirmationId,
+        code,
+      );
+      setSmsCode('');
+      handleExecutionResponse(response);
+    } catch (error) {
+      setSmsError(getSmsErrorMessage(error));
     } finally {
       setIsTyping(false);
     }
@@ -507,11 +586,17 @@ function ChatWidget() {
       return;
     }
 
+    if (pendingSms?.confirmationId && /^\d{4,8}$/.test(trimmedMessage)) {
+      setInputValue('');
+      await handleSmsVerification(trimmedMessage);
+      return;
+    }
+
     const conversationHistory = buildConversationHistory(messages);
     const outgoingAgentContext = {
       ...agentContext,
       extractedFields: stripPrivateResourceFields(agentContext?.extractedFields || {}),
-      pendingAction: pendingFieldAction,
+      pendingAction: pendingFieldAction || agentContext?.pendingAction || null,
     };
 
     setMessages((currentMessages) => [
@@ -606,6 +691,17 @@ function ChatWidget() {
       return;
     }
 
+    if (action.action === 'update_sms_code') {
+      setSmsCode(String(action.code || '').replace(/\D/g, '').slice(0, 8));
+      setSmsError('');
+      return;
+    }
+
+    if (action.action === 'verify_sms') {
+      await handleSmsVerification(action.code);
+      return;
+    }
+
     await sendMessage(action.prompt || action.label);
   };
 
@@ -614,14 +710,171 @@ function ChatWidget() {
     sendMessage();
   };
 
+  const handleLauncherPointerDown = (event) => {
+    if (!isEmbeddedWidget || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    suppressLauncherClickRef.current = true;
+    launcherDragRef.current = {
+      pointerId: event.pointerId,
+      lastX: event.clientX,
+      lastY: event.clientY,
+      totalX: 0,
+      totalY: 0,
+      didDrag: false,
+    };
+
+    window.parent.postMessage(
+      {
+        type: 'ATB_WIDGET_DRAG_START',
+        clientX: event.clientX,
+        clientY: event.clientY,
+      },
+      '*',
+    );
+  };
+
+  const handleLauncherPointerMove = (event) => {
+    const dragState = launcherDragRef.current;
+
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const dx = event.clientX - dragState.lastX;
+    const dy = event.clientY - dragState.lastY;
+
+    dragState.lastX = event.clientX;
+    dragState.lastY = event.clientY;
+    dragState.totalX += dx;
+    dragState.totalY += dy;
+
+    if (!dragState.didDrag && Math.hypot(dragState.totalX, dragState.totalY) > 4) {
+      dragState.didDrag = true;
+    }
+
+    if (!dragState.didDrag) {
+      return;
+    }
+
+    event.preventDefault();
+
+    if (isEmbeddedWidget) {
+      window.parent.postMessage(
+        {
+          type: 'ATB_WIDGET_DRAG_MOVE',
+          clientX: event.clientX,
+          clientY: event.clientY,
+          dx,
+          dy,
+        },
+        '*',
+      );
+      return;
+    }
+
+    window.parent.postMessage(
+      {
+        type: 'ATB_WIDGET_DRAG_MOVE',
+        clientX: event.clientX,
+        clientY: event.clientY,
+        dx,
+        dy,
+      },
+      '*',
+    );
+  };
+
+  const handleLauncherPointerUp = (event) => {
+    const dragState = launcherDragRef.current;
+
+    if (!dragState || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    if (isEmbeddedWidget) {
+      launcherDragRef.current = null;
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      window.parent.postMessage({ type: 'ATB_WIDGET_DRAG_END' }, '*');
+      return;
+    }
+
+    launcherDragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+
+    if (dragState.didDrag) {
+      suppressLauncherClickRef.current = true;
+      window.parent.postMessage({ type: 'ATB_WIDGET_DRAG_END' }, '*');
+      window.setTimeout(() => {
+        suppressLauncherClickRef.current = false;
+      }, 0);
+    }
+  };
+
+  const handleLauncherClick = () => {
+    if (suppressLauncherClickRef.current) {
+      return;
+    }
+
+    if (isOpen) {
+      closeWidget();
+      return;
+    }
+
+    openWidget();
+  };
+
+  useEffect(() => {
+    if (!isEmbeddedWidget) {
+      return;
+    }
+
+    const handleLauncherControlMessage = (event) => {
+      const message = event.data || {};
+
+      if (message.type === 'ATB_WIDGET_LAUNCHER_CLICK') {
+        launcherDragRef.current = null;
+        suppressLauncherClickRef.current = false;
+
+        if (isOpen) {
+          closeWidget();
+        } else {
+          openWidget();
+        }
+        return;
+      }
+
+      if (message.type === 'ATB_WIDGET_DRAG_FINISHED') {
+        launcherDragRef.current = null;
+        window.setTimeout(() => {
+          suppressLauncherClickRef.current = false;
+        }, 0);
+      }
+    };
+
+    window.addEventListener('message', handleLauncherControlMessage);
+    return () => window.removeEventListener('message', handleLauncherControlMessage);
+  }, [isEmbeddedWidget, isOpen]);
+
   return (
-    <section className="chat-widget-shell" aria-label={text.title}>
+    <section
+      className={[
+        'chat-widget-shell',
+        isOpen ? 'chat-widget-shell-open' : '',
+        isEmbeddedWidget ? 'chat-widget-shell-embedded' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      aria-label={text.title}
+    >
       {isOpen && (
         <div
           className={[
             'chat-window',
             isClosing ? 'chat-window-closing' : '',
-            isExpanded ? 'chat-window-expanded' : '',
           ]
             .filter(Boolean)
             .join(' ')}
@@ -643,15 +896,6 @@ function ChatWidget() {
               <button
                 className="chat-icon-button"
                 type="button"
-                onClick={() => setIsExpanded((current) => !current)}
-                aria-label={isExpanded ? text.reduce : text.maximize}
-                aria-pressed={isExpanded}
-              >
-                <MaximizeIcon />
-              </button>
-              <button
-                className="chat-icon-button"
-                type="button"
                 onClick={closeWidget}
                 aria-label={text.close}
               >
@@ -665,7 +909,19 @@ function ChatWidget() {
               {messages.map((message) => (
                 <MessageBubble
                   key={message.id}
-                  message={message}
+                  message={{
+                    ...message,
+                    smsChallenge:
+                      message.smsChallenge &&
+                      pendingSms?.confirmationId === message.smsChallenge.confirmationId
+                        ? {
+                            ...message.smsChallenge,
+                            code: smsCode,
+                            error: smsError,
+                            disabled: isTyping,
+                          }
+                        : null,
+                  }}
                   onAction={handleMessageAction}
                 />
               ))}
@@ -674,13 +930,6 @@ function ChatWidget() {
           </div>
 
           <form className="chat-input-form" onSubmit={handleSubmit}>
-            <button
-              className="chat-attachment-button"
-              type="button"
-              aria-label={text.attachment}
-            >
-              <AttachmentIcon />
-            </button>
             <input
               ref={inputRef}
               value={inputValue}
@@ -704,7 +953,11 @@ function ChatWidget() {
       <button
         type="button"
         className={`chat-launcher ${isOpen ? 'chat-launcher-open' : ''}`}
-        onClick={isOpen ? closeWidget : openWidget}
+        onClick={handleLauncherClick}
+        onPointerDown={handleLauncherPointerDown}
+        onPointerMove={handleLauncherPointerMove}
+        onPointerUp={handleLauncherPointerUp}
+        onPointerCancel={handleLauncherPointerUp}
         aria-label={isOpen ? text.closeLauncher : text.openLauncher}
         aria-expanded={isOpen}
       >

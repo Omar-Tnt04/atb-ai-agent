@@ -1,11 +1,15 @@
 const { spawn } = require("node:child_process");
+const fs = require("node:fs");
 const path = require("node:path");
 
 const rootDir = path.resolve(__dirname, "..", "..");
-const pythonCommand =
+const aiServiceDir = path.join(rootDir, "ai-service-python");
+const venvPython =
   process.platform === "win32"
-    ? path.join(rootDir, "ai-service-python", "venv", "Scripts", "python.exe")
-    : path.join(rootDir, "ai-service-python", "venv", "bin", "python");
+    ? path.join(aiServiceDir, "venv", "Scripts", "python.exe")
+    : path.join(aiServiceDir, "venv", "bin", "python");
+const pythonCommand = fs.existsSync(venvPython) ? venvPython : "python";
+const aiServicePort = process.env.AI_SERVICE_PORT || "8000";
 
 const child = spawn(
   pythonCommand,
@@ -13,14 +17,18 @@ const child = spawn(
     "-m",
     "uvicorn",
     "app.main:app",
+    "--host",
+    "0.0.0.0",
     "--port",
-    "8000",
-    "--log-level",
-    "warning",
+    aiServicePort,
   ],
   {
-    cwd: path.join(rootDir, "ai-service-python"),
+    cwd: aiServiceDir,
     stdio: "inherit",
+    env: {
+      ...process.env,
+      AI_SERVICE_PORT: aiServicePort,
+    },
   },
 );
 

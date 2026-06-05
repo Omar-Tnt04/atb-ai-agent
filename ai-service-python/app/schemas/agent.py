@@ -57,9 +57,15 @@ class AgentContext(BaseModel):
     extractedFields: dict[str, Any] = Field(default_factory=dict)
     suggestedAction: str | None = None
     pendingAction: PendingAction | None = None
+    systemInstruction: str | None = None
+    generalFallback: dict[str, Any] | None = None
+    generalNaturalChat: dict[str, Any] | None = None
+    resourceResponseWriter: dict[str, Any] | None = None
 
 
 class AgentAnalyzeRequest(BaseModel):
+    requestId: str | None = None
+    threadId: str | None = None
     message: str
     userRole: str
     availableActions: list[AvailableAction] = Field(default_factory=list)
@@ -70,14 +76,36 @@ class AgentAnalyzeRequest(BaseModel):
     agentContext: AgentContext | None = None
 
 
+class VisionDocumentAnalyzeRequest(BaseModel):
+    requestId: str | None = None
+    threadId: str | None = None
+    message: str
+    userRole: str
+    conversationHistory: list[dict[str, Any]] = Field(default_factory=list)
+    profileContext: ProfileContext | None = None
+    agentContext: AgentContext | None = None
+    source: str = "backend_pdf"
+    fileName: str | None = None
+    mimeType: str | None = "application/pdf"
+    pdfBase64: str
+    resourceJson: dict[str, Any] | None = None
+    maxPages: int | None = None
+    pageNumbers: list[int] | None = None
+    detailMode: bool | None = False
+
+
 class AgentAnalyzeData(BaseModel):
     source: str
     language: str
     agentMode: str = "informational_answer"
     intent: str
     actionName: str | None
+    suggestedAction: str | None = None
+    documentType: str | None = None
     documentTypeDetected: str | None = None
     confidence: float
+    warnings: list[str] = Field(default_factory=list)
+    markdown: str | None = None
     missingFields: list[str] = Field(default_factory=list)
     extractedFields: dict[str, Any] = Field(default_factory=dict)
     requiredTool: str = "none"
@@ -88,3 +116,36 @@ class AgentAnalyzeData(BaseModel):
 class AgentAnalyzeResponse(BaseModel):
     success: bool
     data: AgentAnalyzeData
+
+
+class AgentDecisionData(BaseModel):
+    decision: str
+    intent: str = "unknown"
+    resourceQuery: str | None = None
+    action: str | None = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+    missingFields: list[str] = Field(default_factory=list)
+    clarificationQuestion: str | None = None
+    quickActions: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AgentDecisionResponse(BaseModel):
+    success: bool
+    data: AgentDecisionData
+
+
+class IntentPlannerData(BaseModel):
+    mode: str
+    needsResourceSearch: bool = False
+    resourceSearchQuery: str | None = None
+    needsActionFlow: bool = False
+    needsDownload: bool = False
+    actionType: str | None = None
+    userGoal: str | None = None
+    confidence: float = 0.0
+    reason: str | None = None
+
+
+class IntentPlannerResponse(BaseModel):
+    success: bool
+    data: IntentPlannerData

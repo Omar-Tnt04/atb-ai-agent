@@ -1433,6 +1433,7 @@ textarea:focus {
 .markdown-content {
   display: grid;
   gap: 10px;
+  min-width: 0;
 }
 
 .markdown-content p,
@@ -1456,6 +1457,7 @@ textarea:focus {
 
 .markdown-content strong {
   color: var(--color-black);
+  font-weight: 850;
 }
 
 .markdown-content code {
@@ -1490,18 +1492,28 @@ textarea:focus {
   overflow-x: auto;
   border: 1px solid var(--color-border);
   border-radius: 8px;
+  background: #ffffff;
 }
 
 .markdown-table-wrapper table {
   width: 100%;
+  min-width: 440px;
   border-collapse: collapse;
+  font-size: 0.88rem;
 }
 
 .markdown-table-wrapper th,
 .markdown-table-wrapper td {
-  padding: 9px 10px;
+  padding: 8px 9px;
+  border-right: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
   text-align: left;
+  vertical-align: top;
+}
+
+.markdown-table-wrapper th:last-child,
+.markdown-table-wrapper td:last-child {
+  border-right: 0;
 }
 
 .markdown-table-wrapper th {
@@ -1599,6 +1611,57 @@ textarea:focus {
   color: var(--color-dark-red);
   background: #fbf5f6;
   transform: translateY(-1px);
+}
+
+.message-sms-form {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.message-sms-field {
+  display: grid;
+  gap: 7px;
+  max-width: 260px;
+  color: var(--color-black);
+  font-size: 0.86rem;
+  font-weight: 900;
+}
+
+.message-sms-field input {
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid rgba(97, 0, 24, 0.22);
+  border-radius: 10px;
+  color: var(--color-black);
+  background: #ffffff;
+  font-size: 1rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  outline: none;
+}
+
+.message-sms-field input:focus {
+  border-color: rgba(97, 0, 24, 0.5);
+  box-shadow: 0 0 0 3px rgba(97, 0, 24, 0.1);
+}
+
+.message-sms-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.message-sms-confirm {
+  color: #ffffff;
+  background: var(--color-dark-red);
+}
+
+.message-sms-confirm:hover {
+  color: #ffffff;
+  background: #7d001f;
 }
 
 .message-attachments {

@@ -1,8 +1,13 @@
 const { spawn } = require("node:child_process");
+const http = require("node:http");
+const https = require("node:https");
 const path = require("node:path");
 
 const rootDir = path.resolve(__dirname, "..", "..");
 const internalServicesDir = path.join(rootDir, "internal-services-demo");
+const aiServicePort = process.env.AI_SERVICE_PORT || "8000";
+const verbose = String(process.env.DEV_VERBOSE || "").toLowerCase() === "true";
+const OUTPUT_BUFFER_LIMIT = 200;
 const services = [
   {
     name: "api",
@@ -12,10 +17,13 @@ const services = [
   },
   {
     name: "ai",
-    url: "http://localhost:8000",
+    url: `http://localhost:${aiServicePort}`,
+    healthUrl: `http://localhost:${aiServicePort}/health`,
     script: path.join(__dirname, "ai.js"),
     readyPattern: /application startup complete|uvicorn running|localhost:8000|127\.0\.0\.1:8000/i,
-    readyDelayMs: 1200,
+    healthTimeoutMs: 45000,
+    startupFailureMessage:
+      "AI service failed to start. Check ai-service-python dependencies or traceback above.",
   },
   {
     name: "web",
@@ -63,25 +71,17 @@ const services = [
 
 const children = new Map();
 let shuttingDown = false;
+let readyBannerPrinted = false;
+let activeAiModel = null;
 
-console.log("========================================");
-console.log(" ATB AI Banking Agent - Local MVP");
-console.log("========================================");
-console.log(" Open the apps:");
-console.log("[web]     http://localhost:5173");
-console.log("[widget]  http://localhost:5174");
-console.log("");
-console.log(" Core services:");
-console.log(" Backend API: http://localhost:5000/health");
-console.log(" AI Service:  http://localhost:8000/health");
-console.log("");
-console.log(" Internal demo services:");
-console.log(" Payment:     http://localhost:7101/health");
-console.log(" Document:    http://localhost:7102/health");
-console.log(" ATB:         http://localhost:7106/health");
-console.log(" Appointment: http://localhost:7104/health");
-console.log(" Account:     http://localhost:7105/health");
-console.log("========================================");
+if (verbose) {
+  console.log("========================================");
+  console.log(" ATB AI Banking Agent - Local MVP");
+  console.log("========================================");
+  console.log(" Starting local services...");
+  console.log(" Verbose logging is enabled.");
+  console.log("========================================");
+}
 
 function stripAnsi(value) {
   return value.replace(/\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g, "");
@@ -132,19 +132,156 @@ function isErrorLine(line) {
   );
 }
 
+function captureAiModel(line) {
+  const match = stripAnsi(line).match(/using Ollama model\s+([^\s]+)\s+at/i);
+  if (match) {
+    activeAiModel = match[1];
+  }
+}
+
+function bufferOutput(state, service, line, streamName) {
+  if (!line.trim()) {
+    return;
+  }
+
+  state.outputBuffer.push({ serviceName: service.name, line, streamName });
+  if (state.outputBuffer.length > OUTPUT_BUFFER_LIMIT) {
+    state.outputBuffer.shift();
+  }
+}
+
+function printBufferedOutput(state) {
+  if (!state.outputBuffer.length) {
+    return;
+  }
+
+  console.error(`[${state.serviceName}] recent output before failure:`);
+  for (const item of state.outputBuffer) {
+    const output = item.streamName === "stderr" ? process.stderr : process.stdout;
+    output.write(`[${item.serviceName}] ${item.line}\n`);
+  }
+}
+
+function printReadyBanner() {
+  if (readyBannerPrinted || shuttingDown) {
+    return;
+  }
+
+  const allReady = services.every((service) => {
+    const state = Array.from(children.values()).find(
+      (item) => item.serviceName === service.name,
+    );
+    return state?.ready;
+  });
+
+  if (!allReady) {
+    return;
+  }
+
+  readyBannerPrinted = true;
+  console.log("========================================");
+  console.log(" ATB AI Banking Agent - Local MVP");
+  console.log("========================================");
+  if (activeAiModel) {
+    console.log(`AI model: ${activeAiModel}`);
+    console.log("");
+  }
+  console.log(" Open the apps:");
+  console.log("[web]     http://localhost:5173");
+  console.log("[demo]    http://localhost:5173/bank-widget-demo.html");
+  console.log("[widget]  http://localhost:5174");
+  console.log("");
+  console.log(" Core services:");
+  console.log(" Backend API: http://localhost:5000/health");
+  console.log(` AI Service:  http://localhost:${aiServicePort}/health`);
+  console.log("");
+  console.log(" Internal demo services:");
+  console.log(" Payment:     http://localhost:7101/health");
+  console.log(" Document:    http://localhost:7102/health");
+  console.log(" ATB:         http://localhost:7106/health");
+  console.log(" Appointment: http://localhost:7104/health");
+  console.log(" Account:     http://localhost:7105/health");
+  console.log("========================================");
+}
+
 function markReady(service, state) {
   if (state.ready || shuttingDown) {
     return;
   }
 
   state.ready = true;
+  if (verbose) {
+    console.log(`[${service.name}] ready: ${service.healthUrl || service.url}`);
+  }
+  printReadyBanner();
+}
+
+function requestHealth(url, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    const parsedUrl = new URL(url);
+    const client = parsedUrl.protocol === "https:" ? https : http;
+    const request = client.get(parsedUrl, { timeout: timeoutMs }, (response) => {
+      response.resume();
+      resolve(response.statusCode >= 200 && response.statusCode < 300);
+    });
+
+    request.on("timeout", () => {
+      request.destroy();
+      resolve(false);
+    });
+    request.on("error", () => resolve(false));
+  });
+}
+
+async function waitForHealth(service, state) {
+  const startedAt = Date.now();
+  const timeoutMs = service.healthTimeoutMs || 30000;
+
+  while (!shuttingDown && !state.exited && Date.now() - startedAt < timeoutMs) {
+    if (await requestHealth(service.healthUrl)) {
+      markReady(service, state);
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  if (!shuttingDown && !state.ready && !state.exited) {
+    console.error(`[${service.name}] ${service.startupFailureMessage || "Service failed to start."}`);
+    printBufferedOutput(state);
+    shutdown(1);
+  }
+}
+
+function startHealthProbe(service, state) {
+  if (!service.healthUrl || state.healthProbeStarted) {
+    return;
+  }
+
+  state.healthProbeStarted = true;
+  waitForHealth(service, state).catch((error) => {
+    console.error(`[${service.name}] health check failed: ${error.message}`);
+    shutdown(1);
+  });
 }
 
 function handleLine(service, state, line, streamName) {
   const cleanLine = stripAnsi(line).trimEnd();
+  captureAiModel(cleanLine);
+  bufferOutput(state, service, cleanLine, streamName);
 
   if (service.readyPattern.test(cleanLine)) {
-    markReady(service, state);
+    if (service.healthUrl) {
+      startHealthProbe(service, state);
+    } else {
+      markReady(service, state);
+    }
+  }
+
+  if (verbose && cleanLine.trim()) {
+    const output = streamName === "stderr" ? process.stderr : process.stdout;
+    output.write(`[${service.name}] ${cleanLine}\n`);
+    return;
   }
 
   if (isSimulatedSms(cleanLine)) {
@@ -158,7 +295,7 @@ function handleLine(service, state, line, streamName) {
     return;
   }
 
-  if (streamName === "stderr" && !isNoisyLine(cleanLine)) {
+  if (streamName === "stderr" && !isNoisyLine(cleanLine) && isErrorLine(cleanLine)) {
     process.stderr.write(`[${service.name}] ${cleanLine}\n`);
   }
 }
@@ -226,33 +363,38 @@ for (const service of services) {
 
   const state = {
     child,
+    serviceName: service.name,
     ready: false,
     readyTimer: null,
+    exited: false,
+    healthProbeStarted: false,
+    outputBuffer: [],
   };
 
   children.set(child.pid, state);
   watchStream(service, state, child.stdout, "stdout");
   watchStream(service, state, child.stderr, "stderr");
 
-  if (service.readyDelayMs) {
-    state.readyTimer = setTimeout(() => {
-      if (children.has(child.pid)) {
-        markReady(service, state);
-      }
-    }, service.readyDelayMs);
-  }
+  startHealthProbe(service, state);
 
   child.on("error", (error) => {
     console.error(`[${service.name}] ${error.message}`);
+    if (service.startupFailureMessage) {
+      console.error(`[${service.name}] ${service.startupFailureMessage}`);
+    }
     shutdown(1);
   });
 
   child.on("exit", (code, signal) => {
+    state.exited = true;
     children.delete(child.pid);
     clearTimeout(state.readyTimer);
 
-    if (!shuttingDown && (code || signal)) {
+    if (!shuttingDown) {
       console.error(`[${service.name}] exited${signal ? ` with ${signal}` : ` with code ${code}`}`);
+      if (!state.ready && service.startupFailureMessage) {
+        console.error(`[${service.name}] ${service.startupFailureMessage}`);
+      }
       shutdown(code || 1);
     }
   });

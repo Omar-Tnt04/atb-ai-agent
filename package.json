@@ -12,7 +12,7 @@
     "dev:combined": "concurrently --kill-others-on-fail --prefix \"[{name}]\" --names \"api,ai,web,widget,pay,doc,atb,apt,acc\" --prefix-colors \"blue,magenta,green,red,cyan,yellow,red,gray,white\" \"npm run dev:backend\" \"npm run dev:ai\" \"npm run dev:web\" \"npm run dev:widget\" \"npm run dev:pay\" \"npm run dev:doc\" \"npm run dev:atb\" \"npm run dev:apt\" \"npm run dev:acc\"",
     "dev:separate": "powershell -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
     "dev:backend": "cd backend-node && npm run dev",
-    "dev:ai": "cd ai-service-python && .\\venv\\Scripts\\python.exe -m uvicorn app.main:app --port 8000 --log-level warning",
+    "dev:ai": "node scripts/dev/ai.js",
     "dev:web": "cd web-client && npm run dev -- --clearScreen false",
     "dev:widget": "cd widget-agent && npm run dev -- --clearScreen false",
     "dev:pay": "node internal-services-demo/payment-service/server.js",
@@ -20,6 +20,8 @@
     "dev:atb": "node internal-services-demo/atb-service/server.js",
     "dev:apt": "node internal-services-demo/appointment-service/server.js",
     "dev:acc": "node internal-services-demo/account-service/server.js",
+    "logs": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$files=@('logs/agent.log','logs/architecture.log') | Where-Object { Test-Path $_ }; if ($files.Count) { Get-Content $files -Wait } else { Write-Host 'No logs found yet. Send a chat request first.' }\"",
+    "logs:errors": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path logs/errors.log) { Get-Content logs/errors.log -Wait } else { Write-Host 'logs/errors.log does not exist yet.' }\"",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

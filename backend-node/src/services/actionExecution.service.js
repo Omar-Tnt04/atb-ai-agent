@@ -33,6 +33,18 @@ const TRANSFER_FEES = 1;
 const paymentReferences = [];
 const transferReferences = [];
 
+const hasValue = (value) =>
+  value !== undefined &&
+  value !== null &&
+  !(typeof value === 'string' && value.trim() === '');
+
+const publicActionPayload = (payload = {}) =>
+  Object.fromEntries(
+    Object.entries(payload || {}).filter(
+      ([key]) => !String(key).startsWith('_'),
+    ),
+  );
+
 const toSafeAccount = (account) => {
   return {
     id: account.id,
@@ -115,6 +127,47 @@ const getBillPaymentContext = ({ user, payload }) => {
     bill,
     sourceAccount,
   };
+};
+
+const buildPreparedBillPaymentPayload = ({ user, payload = {} }) => {
+  const normalizedPayload = {
+    ...payload,
+    sourceAccountId: payload.sourceAccountId || payload.accountId,
+  };
+  const bill = mockBills.find(
+    (mockBill) =>
+      mockBill.billReference === normalizedPayload.billReference &&
+      mockBill.userId === user.id,
+  );
+  const billIndex = bill ? mockBills.indexOf(bill) : -1;
+  const amount = hasValue(normalizedPayload.amount)
+    ? Number(normalizedPayload.amount)
+    : Number(bill?.amount);
+  const preparedBill = {
+    provider: normalizedPayload.provider || bill?.provider,
+    billReference: normalizedPayload.billReference || bill?.billReference,
+    amount,
+    currency: normalizedPayload.currency || bill?.currency || 'TND',
+    status: bill?.status || 'unpaid',
+  };
+
+  return {
+    ...normalizedPayload,
+    provider: preparedBill.provider,
+    billReference: preparedBill.billReference,
+    amount: preparedBill.amount,
+    currency: preparedBill.currency,
+    _preparedBill: preparedBill,
+    ...(billIndex >= 0 ? { _mockBillIndex: billIndex } : {}),
+  };
+};
+
+const buildPreparedConfirmationPayload = ({ actionName, payload = {}, user }) => {
+  if (actionName === 'pay_bill') {
+    return buildPreparedBillPaymentPayload({ user, payload });
+  }
+
+  return payload;
 };
 
 const getTransferContext = ({ user, payload }) => {
@@ -692,21 +745,34 @@ const executeAction = async ({ actionName, payload = {}, user }) => {
       };
     }
 
-    const summary = buildSummary(action, payload, user);
+    const preparedPayload = buildPreparedConfirmationPayload({
+      actionName,
+      payload,
+      user,
+    });
+    const summary = buildSummary(action, preparedPayload, user);
     const confirmation = createPendingConfirmation({
       userId: user.id,
       actionName,
       riskLevel: action.riskLevel,
-      payload,
+      payload: preparedPayload,
       summary,
       expiresInMinutes: 10,
+    });
+
+    console.info('[action-security] confirmation_created', {
+      confirmationId: confirmation.id,
+      actionName,
+      riskLevel: action.riskLevel,
+      hasPreparedPayload: Boolean(preparedPayload),
+      billReference: publicActionPayload(preparedPayload).billReference || undefined,
     });
 
     createExecutionLog({
       user,
       action,
       actionName,
-      payload,
+      payload: preparedPayload,
       status: 'confirmation_required',
       result: {
         confirmationId: confirmation.id,
@@ -731,6 +797,7 @@ const executeAction = async ({ actionName, payload = {}, user }) => {
           requiresSmsVerification: action.requiresSmsVerification,
           executionMode: getExecutionMode(action),
           summary,
+          finalPayload: publicActionPayload(preparedPayload),
           ...(action.riskLevel === 'high'
             ? { maskedPhoneNumber: maskPhoneNumber(user.phoneNumber) }
             : {}),
@@ -879,6 +946,12 @@ const confirmAction = async ({ confirmationId, user }) => {
       confirmationStatus: 'confirmed',
     });
 
+    console.info('[action-security] sms_required', {
+      confirmationId,
+      actionName: confirmation.actionName,
+      smsVerificationStatus: 'created',
+    });
+
     return {
       httpStatus: 200,
       body: {
@@ -888,6 +961,7 @@ const confirmAction = async ({ confirmationId, user }) => {
         data: {
           confirmationId,
           actionName: confirmation.actionName,
+          finalPayload: publicActionPayload(confirmation.payload),
           maskedPhoneNumber: smsCode.maskedPhoneNumber,
           expiresAt: smsCode.expiresAt,
         },
@@ -1156,6 +1230,12 @@ const verifyAndExecuteAction = async ({ confirmationId, code, user }) => {
     purpose: 'high_risk_action',
     actionName: confirmation.actionName,
     confirmationId,
+  });
+
+  console.info('[action-security] sms_verification_result', {
+    confirmationId,
+    actionName: confirmation.actionName,
+    smsVerificationStatus: smsResult.status,
   });
 
   if (!smsResult.success) {

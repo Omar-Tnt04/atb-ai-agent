@@ -26,8 +26,14 @@ The MVP uses separate local Express services to simulate ATB internal applicatio
 ### Architecture
 
 ```text
-User → React Chat → Node Backend Orchestrator → Python AI Service → Action Registry → Connector → Internal Demo Service API → Result → Admin Dashboard
+User -> React Chat/Widget -> Node Chat Route -> Python AI Decision Stage -> Node Secure Resource/Action Layer -> Python AI Final Response -> Result -> Admin Dashboard
 ```
+
+Checkpoint 2 follows the supervisor-requested Ollama-first flow conceptually:
+
+- AI decides whether the request is `answer_directly`, `search_resource`, `prepare_action`, or `ask_clarification`.
+- Backend validates and executes resource lookups/actions. Laragon JSON/PDF URLs, internal services, confirmations, SMS verification, and audit logs stay backend-controlled.
+- Frontend displays the final Markdown answer, quick actions, Download PDF, Confirm, and Cancel controls.
 
 ### Internal services
 
@@ -114,6 +120,30 @@ The chat supports local MVP uploads for banking PDFs and images, plus simple
 TXT, CSV, and JSON files. PDF text extraction, scanned/image PDF handling,
 image OCR, and text/CSV/JSON understanding are handled by the backend file
 context service.
+
+## Laragon demo resources
+
+For the current local demo, Laragon resources live in:
+
+```text
+C:\laragon\www\atb-general-resources
+```
+
+The active local resource base URL is:
+
+```text
+http://localhost/atb-general-resources
+```
+
+The backend reads the catalog from
+`http://localhost/atb-general-resources/json/catalog.json` and resolves PDFs
+under `http://localhost/atb-general-resources/documents/`.
+
+The chat route does not search this catalog until the AI decision stage returns
+`search_resource`. After that decision, the backend searches the catalog,
+validates the selected resource URL against the configured resource base URL,
+extracts trusted PDF text when available, and sends the resolved context back
+to the AI service for the final answer.
 
 ## Connector layer
 
