@@ -9,8 +9,18 @@ const {
   handleChatMessageWithFiles,
 } = require('../controllers/chat.controller');
 const authMiddleware = require('../middleware/auth.middleware');
+const { routeTraceMiddleware, isVerboseRequestLog } = require('../services/routeTrace.service');
 
 const router = express.Router();
+
+// First-line proof that a /chat/message request reached THIS process/handler.
+const logChatRequestEntered = (req, res, next) => {
+  if (isVerboseRequestLog()) {
+    const message = String(req.body?.message || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+    console.log(`[CHAT_REQUEST_ENTERED] message="${message}"`);
+  }
+  return next();
+};
 
 const uploadDir = path.resolve(__dirname, '..', '..', 'uploads', 'chat');
 fs.mkdirSync(uploadDir, { recursive: true });
@@ -104,9 +114,10 @@ const handleUpload = (req, res, next) => {
 };
 
 router.use(authMiddleware);
+router.use(routeTraceMiddleware);
 
 router.post('/analyze', analyzeChatMessage);
-router.post('/message', handleChatMessage);
+router.post('/message', logChatRequestEntered, handleChatMessage);
 router.post('/message-with-files', handleUpload, handleChatMessageWithFiles);
 
 module.exports = router;

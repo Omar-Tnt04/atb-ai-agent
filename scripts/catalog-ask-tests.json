@@ -1,0 +1,86 @@
+[
+  {
+    "mode": "ask",
+    "prompt": "what phone number is on my customer profile?",
+    "expectedMatch": "Customer Profile Overview",
+    "expectedContains": ["+216 98 259 414"],
+    "forbiddenContains": ["71 000 000", "not found", "unavailable"]
+  },
+  {
+    "mode": "ask",
+    "prompt": "what is the support phone for Tunis branches?",
+    "expectedMatch": "ATB Branch Directory - Tunis Region",
+    "expectedContains": ["71 000 000"],
+    "forbiddenContains": ["+216 98 259 414"]
+  },
+  {
+    "mode": "ask",
+    "prompt": "what is my primary branch?",
+    "expectedMatch": "Customer Profile Overview",
+    "expectedContains": ["Tunis Centre"],
+    "forbiddenContains": ["Ariana", "Lac 1", "Menzah"]
+  },
+  {
+    "mode": "ask",
+    "prompt": "how do I activate ATB Connect?",
+    "expectedMatch": "ATB Connect Activation Guide",
+    "expectedContains": ["identity", "OTP"],
+    "forbiddenContains": []
+  },
+  {
+    "mode": "ask",
+    "prompt": "should I share my OTP with ATB staff?",
+    "expectedMatch": "Mobile Banking Security Notice",
+    "expectedContains": ["never", "OTP"],
+    "forbiddenContains": ["safe to share", "you may share", "you can share"]
+  },
+  {
+    "mode": "ask",
+    "prompt": "what is my available card limit for card ending 1122?",
+    "expectedMatch": "Credit Card Limit Notice",
+    "expectedContains": ["1735.250", "TND"],
+    "forbiddenContains": ["2500.000"]
+  },
+  {
+    "mode": "ask",
+    "prompt": "when is my card payment due?",
+    "expectedMatch": "Credit Card Limit Notice",
+    "expectedContains": ["2026-06-10", "120.000"],
+    "forbiddenContains": []
+  },
+  {
+    "mode": "ask",
+    "prompt": "is my STEG bill already paid?",
+    "expectedMatch": "STEG Bill Payment Receipt",
+    "expectedContains": ["Paid"],
+    "forbiddenContains": ["Unpaid", "not paid", "pending"]
+  },
+  {
+    "mode": "ask",
+    "prompt": "how much is my unpaid SONEDE bill?",
+    "expectedMatch": "SONEDE Bill Payment Request",
+    "expectedContains": ["48.750", "TND"],
+    "forbiddenContains": ["Paid", "already paid"]
+  },
+  {
+    "mode": "ask",
+    "prompt": "what is the status of my checkbook request?",
+    "expectedMatch": "Checkbook Request Status",
+    "expectedContains": ["preparation", "2026-05-27", "Tunis Centre"],
+    "forbiddenContains": ["ready for pickup", "already ready", "status: Ready", "Confirmed", "Delivered"]
+  },
+  {
+    "mode": "ask",
+    "prompt": "what documents are required for an SME account?",
+    "expectedMatch": "SME Account Opening Checklist",
+    "expectedContains": ["business registration", "CIN"],
+    "forbiddenContains": []
+  },
+  {
+    "mode": "ask",
+    "prompt": "what is my savings goal progress?",
+    "expectedMatch": "Savings Goal Progress",
+    "expectedContains": ["Laptop Fund", "2240.000", "64%"],
+    "forbiddenContains": []
+  }
+]

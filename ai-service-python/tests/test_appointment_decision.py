@@ -315,7 +315,7 @@ class AppointmentDecisionTests(unittest.TestCase):
         self.assertIn("Customer Profile Overview", message)
         self.assertNotEqual(message.strip(), "Category: customer_profile")
         self.assertNotIn("Category: **customer_profile**", message)
-        self.assertGreaterEqual(message.count("\n- "), 4)
+        self.assertNotIn("\n- ", message)
         for expected in [
             "Full name: **Omar Tentouch**",
             "Segment: **Student / Young Professional**",
@@ -411,9 +411,44 @@ class AppointmentDecisionTests(unittest.TestCase):
             )
         )
 
-        self.assertIn("mobile banking security notice recommends", analysis["assistantMessage"])
+        self.assertIn("**mobile banking security notice** recommends", analysis["assistantMessage"])
         self.assertIn("Never share OTP", analysis["assistantMessage"])
+        self.assertNotIn("\n- ", analysis["assistantMessage"])
         self.assertFalse(analysis["toolInput"].get("quickActions"))
+
+    def test_sms_alert_txt_resource_is_structured_answer(self):
+        analysis = analyze_message(
+            request(
+                "What happened in my SMS card alert?",
+                resolvedResourceContext=ResolvedResourceContext(
+                    resourceJson={
+                        "resourceType": "txt_test_resource",
+                        "title": "SMS Alert Transcript",
+                        "mimeType": "text/plain",
+                        "fileUrl": "/resources/txt/01_sms_alert_transcript.txt",
+                    },
+                    fileText=(
+                        "card: ************1122\n"
+                        "merchant: TechStore Tunis\n"
+                        "amount: 312.900 TND\n"
+                        "date: 2026-06-03\n"
+                        "time: 17:26\n"
+                        "status: Alert sent\n"
+                        "recommendedAction: If this transaction was not yours, create a card dispute immediately.\n"
+                    ),
+                    extractionStatus="extracted",
+                ),
+            )
+        )
+
+        message = analysis["assistantMessage"]
+        self.assertIn("**SMS card alert**", message)
+        self.assertIn("Card:", message)
+        self.assertIn("1122", message)
+        self.assertIn("Merchant: **TechStore Tunis**", message)
+        self.assertIn("Amount: **312.900 TND**", message)
+        self.assertIn("Status: **Alert sent**", message)
+        self.assertNotIn("\n- ", message)
 
 
 if __name__ == "__main__":

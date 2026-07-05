@@ -870,6 +870,27 @@ def _is_account_details_request(message: str) -> bool:
     )
 
 
+def _is_card_resource_question(message: str) -> bool:
+    normalized_message = re.sub(
+        r"\s+",
+        " ",
+        str(message or "").lower().replace("_", " ").replace("-", " "),
+    ).strip()
+    return _matches_any(
+        normalized_message,
+        [
+            r"\b(?:credit\s+card|card)\b.{0,50}\b(?:current\s+)?limit\b",
+            r"\b(?:current\s+|available\s+)?limit\b.{0,50}\b(?:credit\s+card|card)\b",
+            r"\bavailable\s+(?:card\s+)?limit\b",
+            r"\b(?:credit\s+card|card)\b.{0,50}\bpayment\s+due(?:\s+date)?\b",
+            r"\bpayment\s+due(?:\s+date)?\b.{0,50}\b(?:credit\s+card|card)\b",
+            r"\b(?:credit\s+card|card)\b.{0,50}\bminimum\s+payment\b",
+            r"\bminimum\s+payment\b.{0,50}\b(?:credit\s+card|card)\b",
+            r"\bcard\s+notice\b",
+        ],
+    )
+
+
 def _is_appointment_booking_message(message: str) -> bool:
     normalized_message = message.lower()
     return _matches_any(
@@ -901,6 +922,9 @@ def _is_appointment_lookup_message(message: str) -> bool:
 
 def detect_intent(message: str) -> tuple[str, float]:
     normalized_message = message.lower()
+
+    if _is_card_resource_question(message):
+        return "unknown", 0.35
 
     if _matches_any(normalized_message, [r"\bcmp(?:-demo)?-\d{4}-\d{3,6}\b"]):
         return "check_complaint_status", 0.92
@@ -1887,7 +1911,7 @@ def _format_generic_resource_summary(resource_json: dict, limit: int = 8) -> str
 
     return "\n\n".join([
         f"I found your **{title}**.",
-        _markdown_bullets(rows),
+        _markdown_key_sentences(rows),
     ])
 
 
@@ -1897,6 +1921,113 @@ def _resource_first_value(resource_json: dict, *keys: str):
         if value is not None and str(value).strip() != "":
             return value
     return None
+
+
+def _parse_labeled_resource_text(file_text: str) -> dict:
+    fields: dict[str, str] = {}
+    if not file_text:
+        return fields
+
+    for line in file_text.splitlines():
+        match = re.match(r"^\s*([A-Za-z][A-Za-z0-9 _/-]{1,60})\s*:\s*(.+?)\s*$", line)
+        if not match:
+            continue
+        key = re.sub(r"[^A-Za-z0-9]+", "_", match.group(1).strip()).strip("_")
+        value = match.group(2).strip()
+        if key and value:
+            fields[key] = value
+    return fields
+
+
+def _text_field(fields: dict, *keys: str):
+    normalized = {
+        re.sub(r"[^a-z0-9]+", "", key.lower()): value
+        for key, value in fields.items()
+    }
+    for key in keys:
+        value = normalized.get(re.sub(r"[^a-z0-9]+", "", key.lower()))
+        if value is not None and str(value).strip():
+            return value
+    return None
+
+
+def _format_text_resource_summary(resource_json: dict, file_text: str, message: str = "") -> str | None:
+    fields = _parse_labeled_resource_text(file_text)
+    if not fields:
+        return None
+
+    title = _resource_title(resource_json)
+    normalized_title = str(title or "").lower()
+    normalized_message = str(message or "").lower()
+
+    if "sms" in normalized_title or "sms" in normalized_message or "card alert" in normalized_message:
+        rows = [
+            ("Card", _text_field(fields, "card", "maskedCard")),
+            ("Merchant", _text_field(fields, "merchant")),
+            ("Amount", _text_field(fields, "amount")),
+            ("Date", _text_field(fields, "date")),
+            ("Time", _text_field(fields, "time")),
+            ("Status", _text_field(fields, "status")),
+        ]
+        body = _markdown_key_sentences(rows)
+        recommendation = _text_field(fields, "recommendedAction", "recommendation")
+        return "\n\n".join(filter(None, [
+            "The **SMS card alert** was triggered by a card transaction.",
+            body,
+            f"Recommended action: {_bold_value(recommendation)}" if recommendation else None,
+        ])).strip()
+
+    if "wire transfer" in normalized_title or "canada" in normalized_message:
+        rows = [
+            ("Beneficiary", _text_field(fields, "beneficiary", "beneficiaryName")),
+            ("Destination country", _text_field(fields, "destinationCountry", "country")),
+            ("Amount", _text_field(fields, "amount")),
+            ("Fee estimate", _text_field(fields, "feeEstimate", "fee")),
+            ("Purpose", _text_field(fields, "purpose")),
+            ("Status", _text_field(fields, "status")),
+        ]
+        return "\n\n".join([
+            f"I found **{title}**.",
+            _markdown_key_sentences(rows),
+        ]).strip()
+
+    if "direct debit" in normalized_title or "mandate" in normalized_message:
+        rows = [
+            ("Mandate ID", _text_field(fields, "mandateId", "mandateID")),
+            ("Source account", _text_field(fields, "sourceAccount", "sourceAccountId", "accountId")),
+            ("Merchant", _text_field(fields, "merchant")),
+            ("Amount limit", _text_field(fields, "amountLimit", "limit")),
+            ("Frequency", _text_field(fields, "frequency")),
+            ("Next debit date", _text_field(fields, "nextDebitDate")),
+            ("Status", _text_field(fields, "status")),
+        ]
+        return "\n\n".join([
+            "I found an **active direct debit mandate**.",
+            _markdown_key_sentences(rows),
+        ]).strip()
+
+    if "atb connect" in normalized_title or "otp" in normalized_message:
+        rows = [
+            ("Error code", _text_field(fields, "errorCode", "code")),
+            ("Issue", _text_field(fields, "issue", "topic")),
+            ("Last failed attempt", _text_field(fields, "lastFailedAttempt", "lastAttempt")),
+            ("Status", _text_field(fields, "status")),
+            ("Recommended action", _text_field(fields, "recommendedAction", "recommendation")),
+        ]
+        return "\n\n".join([
+            "Your **ATB Connect OTP** is temporarily locked based on the login error note.",
+            _markdown_key_sentences(rows),
+        ]).strip()
+
+    rows = [
+        (_humanize_resource_label(key), value)
+        for key, value in fields.items()
+        if key.lower() not in {"agent_expected_behavior", "synthetic_text_resource_for_atb_ai_agent_testing_not_a_real_bank_document"}
+    ][:8]
+    return "\n\n".join([
+        f"I found **{title}**.",
+        _markdown_key_sentences(rows),
+    ]).strip()
 
 
 def _bold_value(value) -> str:
@@ -1921,6 +2052,15 @@ def _markdown_bullets(rows: list[tuple[str, object]]) -> str:
             continue
         lines.append(f"- {label}: {_bold_value(value)}")
     return "\n".join(lines)
+
+
+def _markdown_key_sentences(rows: list[tuple[str, object]], *, separator: str = " ") -> str:
+    sentences = []
+    for label, value in rows:
+        if value is None or str(value).strip() == "":
+            continue
+        sentences.append(f"{label}: {_bold_value(value)}.")
+    return separator.join(sentences)
 
 
 def _compact_join(parts: list[object], separator: str = " ") -> str:
@@ -3047,6 +3187,14 @@ def _build_resource_summary(request: AgentAnalyzeRequest, file_text: str, extrac
     currency = resource_json.get("currency") or _extract_currency(file_text, extracted_fields)
     title = _resource_title(resource_json)
 
+    text_resource_summary = _format_text_resource_summary(resource_json, file_text, request.message)
+    if text_resource_summary and (
+        resource_type in {"txt", "text", "txt_test_resource"}
+        or str(resource_json.get("mimeType") or resource_json.get("contentType") or "").lower().startswith("text/")
+        or str(resource_json.get("fileUrl") or "").lower().endswith(".txt")
+    ):
+        return text_resource_summary
+
     if resource_type == "account_statement":
         return _build_resource_account_statement_summary(resource_json)
 
@@ -3352,19 +3500,19 @@ def _build_resource_direct_answer(
             or resource_json.get("actions")
         )
         if isinstance(recommendations, list) and recommendations:
-            bullets = "\n".join(
-                f"- {_bold_value(item)}"
-                for item in recommendations[:6]
+            recommendation_text = " ".join(
+                f"Recommendation {index}: {_bold_value(item)}."
+                for index, item in enumerate(recommendations[:6], start=1)
                 if str(item).strip()
             )
-            if bullets:
+            if recommendation_text:
                 return "\n\n".join([
-                    "The mobile banking security notice recommends:",
-                    bullets,
+                    "The **mobile banking security notice** recommends these actions.",
+                    recommendation_text,
                 ])
         summary = resource_json.get("summary") or resource_json.get("description")
         if summary:
-            return f"The mobile banking security notice recommends: **{summary}**"
+            return f"The **mobile banking security notice** recommends: {_bold_value(summary)}"
 
     if resource_type == "card_dispute" and ("status" in normalized_message or "dispute" in normalized_message):
         status = resource_json.get("status") or "not found"
@@ -3695,6 +3843,170 @@ def _is_general_natural_chat_request(request: AgentAnalyzeRequest) -> bool:
 
 def _is_resource_response_writer_request(request: AgentAnalyzeRequest) -> bool:
     return bool(request.agentContext and request.agentContext.resourceResponseWriter)
+
+
+def _writer_normalized_key(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+
+def _writer_format_value(value) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, list):
+        return ", ".join(
+            item for item in (_writer_format_value(item) for item in value) if item
+        )
+    if isinstance(value, dict):
+        return "; ".join(
+            f"{key}: {_writer_format_value(item)}"
+            for key, item in value.items()
+            if _writer_format_value(item)
+        )
+    return re.sub(r"\s+", " ", str(value)).strip()
+
+
+def _writer_bold(value) -> str:
+    formatted = _writer_format_value(value)
+    return f"**{formatted}**" if formatted else ""
+
+
+def _writer_pick(fields: dict, *keys: str):
+    normalized = {
+        _writer_normalized_key(key): value
+        for key, value in (fields or {}).items()
+    }
+    for key in keys:
+        value = normalized.get(_writer_normalized_key(key))
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _writer_action_label(action_type: str | None) -> str:
+    text = str(action_type or "action").replace("_", " ").strip()
+    return text or "action"
+
+
+def _build_resource_response_writer_fallback(request: AgentAnalyzeRequest) -> dict:
+    writer = request.agentContext.resourceResponseWriter if request.agentContext else {}
+    writer = writer if isinstance(writer, dict) else {}
+    intent = writer.get("intent") if isinstance(writer.get("intent"), dict) else {}
+    resource = writer.get("resource") if isinstance(writer.get("resource"), dict) else None
+    action_draft = writer.get("actionDraft") if isinstance(writer.get("actionDraft"), dict) else {}
+    fields = resource.get("fields", {}) if resource else {}
+    title = resource.get("title") if resource else None
+    summary = _writer_format_value(resource.get("summary")) if resource else ""
+    mode = intent.get("mode") or ""
+    status_question = bool(intent.get("statusQuestion"))
+
+    assistant_message = ""
+
+    if action_draft.get("status") == "prepared":
+        action_fields = action_draft.get("fields", {})
+        action_label = _writer_action_label(action_draft.get("type"))
+        provider = _writer_pick(action_fields, "provider", "merchant", "beneficiaryName")
+        amount = _writer_pick(action_fields, "amount", "totalAmount")
+        reference = _writer_pick(action_fields, "billReference", "reference", "receiptId")
+        source_account = _writer_pick(action_fields, "sourceAccountId", "accountId")
+        parts = []
+        if provider:
+            parts.append(f"for {_writer_bold(provider)}")
+        if amount:
+            parts.append(f"amount {_writer_bold(amount)}")
+        if reference:
+            parts.append(f"reference {_writer_bold(reference)}")
+        if source_account:
+            parts.append(f"from {_writer_bold(source_account)}")
+        detail = ", ".join(parts)
+        assistant_message = (
+            f"I prepared the **{action_label}** action"
+            f"{' ' + detail if detail else ''}.\n\n"
+            "Please use **Confirm** to continue or **Cancel** to stop before anything is executed."
+        )
+    elif not resource:
+        assistant_message = (
+            "I could not find a matching resource for that request. "
+            "Please try another resource name, topic, reference, or account hint."
+        )
+    else:
+        status = _writer_pick(fields, "status", "requestStatus", "signatureStatus")
+        provider = _writer_pick(fields, "provider", "biller", "merchant", "beneficiaryName")
+        amount = _writer_pick(fields, "amount", "totalAmount", "amountDue", "currentLimit")
+        available_limit = _writer_pick(fields, "availableLimit")
+        reference = _writer_pick(fields, "billReference", "reference", "receiptId", "requestId", "certificateId")
+        date = _writer_pick(fields, "date", "dueDate", "paymentDueDate", "statementDate", "appointmentDate")
+        card = _writer_pick(fields, "card", "maskedCard", "cardNumber")
+        recommendation = _writer_pick(fields, "recommendedAction", "recommendation", "advice")
+
+        if status_question and status:
+            assistant_message = f"Status: {_writer_bold(status)}."
+            if title:
+                assistant_message += f" This is from **{title}**."
+        elif recommendation:
+            assistant_message = (
+                f"The **{title or 'security notice'}** recommends {_writer_bold(recommendation)}."
+            )
+            if status or date:
+                detail_parts = []
+                if status:
+                    detail_parts.append(f"marked {_writer_bold(status)}")
+                if date:
+                    detail_parts.append(f"dated {_writer_bold(date)}")
+                assistant_message += f" It is {', '.join(detail_parts)}."
+        elif amount and ("limit" in _writer_normalized_key(" ".join(fields.keys()))):
+            assistant_message = (
+                f"Your **credit card limit** is {_writer_bold(amount)}"
+                f"{f' for card ending {_writer_bold(card)}' if card else ''}."
+            )
+            if available_limit or date:
+                detail_parts = []
+                if available_limit:
+                    detail_parts.append(f"available limit {_writer_bold(available_limit)}")
+                if date:
+                    detail_parts.append(f"date {_writer_bold(date)}")
+                assistant_message += f" It also shows {', '.join(detail_parts)}."
+        elif amount or provider or reference:
+            assistant_message = (
+                f"I found **{title or 'the receipt'}**"
+                f"{f' for {_writer_bold(provider)}' if provider else ''}."
+            )
+            details = []
+            if amount:
+                details.append(f"amount {_writer_bold(amount)}")
+            if reference:
+                details.append(f"reference {_writer_bold(reference)}")
+            if date:
+                details.append(f"date {_writer_bold(date)}")
+            if status:
+                details.append(f"status {_writer_bold(status)}")
+            if details:
+                assistant_message += f" It shows {', '.join(details)}."
+        else:
+            assistant_message = f"I found **{title or 'the matching resource'}**."
+            if summary:
+                assistant_message += f" {summary}"
+
+        if mode == "resource_document" and resource.get("downloadAvailable"):
+            assistant_message += "\n\nYou can use **Download PDF** to open the document."
+        if resource.get("openImageAvailable"):
+            assistant_message += "\n\nYou can use **View image** to open the image."
+
+    return {
+        "source": "rule_based_response_writer",
+        "language": detect_language(request.message),
+        "agentMode": "informational_answer",
+        "intent": "informational_answer",
+        "actionName": None,
+        "confidence": 0.6,
+        "markdown": assistant_message,
+        "missingFields": [],
+        "extractedFields": {},
+        "requiredTool": "none",
+        "toolInput": {},
+        "assistantMessage": assistant_message,
+    }
 
 
 def _is_generic_capabilities_response(value: str | None) -> bool:
@@ -4105,7 +4417,7 @@ def analyze_message(request: AgentAnalyzeRequest) -> dict:
             except (OllamaServiceError, ValueError, TypeError, KeyError):
                 pass
 
-        return analyze_uploaded_file(request)
+        return _build_resource_response_writer_fallback(request)
 
     # 1. File analysis
     if _is_file_analysis_request(request):

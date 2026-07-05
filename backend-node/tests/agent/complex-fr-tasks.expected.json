@@ -1,0 +1,65 @@
+[
+  {
+    "task": "Je veux recevoir des notifications sur les mouvements de mon compte sans me connecter à la banque en ligne. Trouve le document nécessaire pour activer ce service.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["Messenger", "notification", "alerte"],
+    "urlIncludesAny": ["MESSENGER", "messenger"],
+    "rejectTitleIncludesAny": ["ouverture de compte", "compte joint", "Personne Physique", "ATBNET"]
+  },
+  {
+    "task": "Je veux connaître les frais appliqués par la banque avant d'ouvrir un compte. Trouve le document officiel qui détaille ces frais.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["Tarification", "Tarifications", "tarif", "Tarifs", "frais"],
+    "urlIncludesAny": ["tarif", "tarifs"],
+    "rejectTitleIncludesAny": ["ouverture de compte", "compte joint", "carte bancaire", "Personne Physique"]
+  },
+  {
+    "task": "Je veux ouvrir un compte avec une autre personne. Trouve le document adapté, pas le formulaire de compte individuel.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["compte joint"],
+    "urlIncludesAny": ["joint"],
+    "rejectTitleIncludesAny": ["Personne Physique", "individuel"]
+  },
+  {
+    "task": "Je veux demander une carte bancaire pour mon compte. Trouve le document officiel de demande.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["carte bancaire", "carte"],
+    "urlIncludesAny": ["carte"]
+  },
+  {
+    "task": "Je veux ouvrir un compte, mais je cherche le fichier à remplir, pas la page devenir client.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["ouverture de compte", "Personne Physique", "compte joint"]
+  },
+  {
+    "task": "Je veux gérer mon compte bancaire depuis mon téléphone et m'abonner au service mobile. Trouve le formulaire officiel correspondant.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["Mobilink", "mobile"],
+    "urlIncludesAny": ["MOBILINK", "mobilink", "mobile"]
+  },
+  {
+    "task": "Je veux consulter mes comptes à distance depuis internet. Trouve le document d'inscription adapté.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["ATBNET", "ATBMobile", "internet", "ligne"],
+    "urlIncludesAny": ["ATBNET", "ATBMobile"]
+  },
+  {
+    "task": "Je pars à l'étranger et je veux récupérer un montant lié à mon allocation touristique. Trouve la demande correspondante.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["allocation touristique", "restitution"],
+    "urlIncludesAny": ["allocation", "touristique", "restitution"]
+  },
+  {
+    "task": "Je veux financer un achat personnel et préparer le dossier de demande. Trouve le document de crédit adapté aux particuliers.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["Crédit", "credit", "particuliers"],
+    "urlIncludesAny": ["credit", "particulier"]
+  },
+  {
+    "task": "Je veux savoir combien coûtent les opérations bancaires courantes. Trouve le document officiel avec les tarifs.",
+    "expectedResourceType": "document",
+    "titleIncludesAny": ["Tarification", "Tarifications", "tarif", "Tarifs"],
+    "urlIncludesAny": ["tarif", "tarifs"],
+    "rejectTitleIncludesAny": ["ouverture de compte", "compte joint", "carte bancaire"]
+  }
+]

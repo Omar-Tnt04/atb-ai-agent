@@ -25,6 +25,7 @@ import {
   removeToken,
   removeUser,
 } from '../utils/authStorage';
+import { selectLoadingSequence } from '../utils/loadingStatus.js';
 
 const statusLabels = {
   action_prepared: 'Action Prepared',
@@ -330,9 +331,14 @@ const normalizeQuickReply = (reply, index) => {
     return { label: reply, action: 'prompt', prompt: reply };
   }
 
-  const rawUrl = reply.url || reply.downloadUrl || reply.fileUrl || null;
+  const rawUrl = reply.url || reply.viewUrl || reply.downloadUrl || reply.fileUrl || null;
   const safeUrl = toSafeBackendUrl(rawUrl);
-  const normalizedAction = reply.action || reply.type || (safeUrl ? 'open_url' : 'prompt');
+  const rawAction = reply.action || reply.type || '';
+  const normalizedAction = ['open', 'view_image'].includes(rawAction)
+    ? 'open_url'
+    : rawAction === 'download_pdf'
+      ? 'download'
+      : rawAction || (safeUrl ? 'open_url' : 'prompt');
 
   // The browser may only open backend-approved URLs. Laragon, Python AI, and
   // model endpoints must stay behind the backend orchestration boundary.
@@ -456,6 +462,8 @@ function ChatPage() {
   const [isSending, setIsSending] = useState(false);
   const [assistantActivity, setAssistantActivity] = useState('');
   const [actionLoadingText, setActionLoadingText] = useState('');
+  const [animatingMessageId, setAnimatingMessageId] = useState(null);
+  const loadingSequenceRef = useRef([]);
   const [pendingAction, setPendingAction] = useState(
     initialThread?.pendingAction || null,
   );
@@ -498,6 +506,7 @@ function ChatPage() {
     setAgentContext(thread.agentContext || EMPTY_AGENT_CONTEXT);
     setAssistantActivity('');
     setActionLoadingText('');
+    setAnimatingMessageId(null);
   }, []);
 
   const updateCurrentThread = useCallback(
@@ -577,6 +586,23 @@ function ChatPage() {
     pendingGeneratedFile,
     scrollToBottom,
   ]);
+
+  // While a request is in flight, step through route-aware "-ing" statuses for the sticker.
+  useEffect(() => {
+    if (!isSending) return undefined;
+    const sequence = loadingSequenceRef.current;
+    if (!sequence.length) return undefined;
+
+    setAssistantActivity(sequence[0]);
+    let stepIndex = 0;
+    const timer = window.setInterval(() => {
+      stepIndex = Math.min(stepIndex + 1, sequence.length - 1);
+      setAssistantActivity(sequence[stepIndex]);
+      if (stepIndex >= sequence.length - 1) window.clearInterval(timer);
+    }, 1100);
+
+    return () => window.clearInterval(timer);
+  }, [isSending]);
 
   const conversationHistory = useMemo(
     () =>
@@ -828,7 +854,9 @@ function ChatPage() {
         response.data?.executionMode ||
         'internal_demo_service';
       appendAssistantMessage({
-        text: buildCompletionText(executionMode, response.data),
+        text: response.data?.localSimulation && response.assistantMessage
+          ? response.assistantMessage
+          : buildCompletionText(executionMode, response.data),
         status: response.status,
         details: buildResultDetails(response.data),
       });
@@ -952,6 +980,9 @@ function ChatPage() {
       'submit it',
       'yes do it',
       'ok do it',
+      'yes confirm',
+      'ok confirm',
+      'confirm it',
     ].includes(normalizedCommand(text));
 
   const sendMessage = async (messageOverride = '') => {
@@ -999,8 +1030,12 @@ function ChatPage() {
       }
     }
 
+    loadingSequenceRef.current = selectLoadingSequence({
+      message: userMessage,
+      hasFiles: filesToSend.length > 0,
+    });
+    setAssistantActivity(loadingSequenceRef.current[0] || getActivityLabel(filesToSend.length > 0, userMessage));
     setIsSending(true);
-    setAssistantActivity(getActivityLabel(filesToSend.length > 0, userMessage));
 
     // Carry the full context every turn: accumulated extracted fields, the
     // suggested action, and any action whose fields are still being collected.
@@ -1036,7 +1071,10 @@ function ChatPage() {
       updateThreadMetadata({ agentContext: nextAgentContext });
 
       if (shouldAppendAssistantMessage(response)) {
+        const assistantMessageId = `${Date.now()}-${Math.random()}`;
+        setAnimatingMessageId(assistantMessageId);
         appendAssistantMessage({
+          id: assistantMessageId,
           text: buildAssistantText(response),
           status: response.status,
           details: buildAssistantDetails(response),
@@ -1063,6 +1101,14 @@ function ChatPage() {
 
   const handleQuickAction = (quickAction) => {
     if (isSending) return;
+
+    if (['open_url', 'download'].includes(quickAction.action) && quickAction.url) {
+      const safeUrl = toSafeBackendUrl(quickAction.url);
+      if (safeUrl) {
+        window.open(safeUrl, '_blank', 'noopener,noreferrer');
+      }
+      return;
+    }
 
     if (quickAction.type === 'upload') {
       handlePickFiles();
@@ -1406,6 +1452,10 @@ function ChatPage() {
                 {messages.map((chatMessage) => (
                   <ChatMessage
                     key={chatMessage.id}
+                    animate={
+                      chatMessage.sender === 'assistant' &&
+                      chatMessage.id === animatingMessageId
+                    }
                     formatStatus={formatStatus}
                     message={{
                       ...chatMessage,

@@ -19,13 +19,28 @@ const resourceRoutes = require('./routes/resource.routes');
 const smsVerificationRoutes = require('./routes/smsVerification.routes');
 const transferRoutes = require('./routes/transfer.routes');
 const widgetDemoRoutes = require('./routes/widgetDemo.routes');
+const devLauncherRoutes = require('./routes/devLauncher.routes');
 const { notFoundHandler, errorHandler } = require('./middleware/error.middleware');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
-app.use(morgan('dev'));
+
+// In DEMO_CONSOLE mode suppress all HTTP access logs (replaced by [DEMO] step lines).
+// In debug mode keep morgan 'dev'; suppress only poll GETs when LOG_BROWSER_POLLING=false.
+const _isDemoConsole = () =>
+  ['1', 'true', 'yes', 'on'].includes(String(process.env.DEMO_CONSOLE || '').toLowerCase());
+const _isLogPolling = () =>
+  ['1', 'true', 'yes', 'on'].includes(String(process.env.LOG_BROWSER_POLLING || '').toLowerCase());
+
+app.use(morgan('dev', {
+  skip: (req) => {
+    if (_isDemoConsole()) return true;
+    if (!_isLogPolling() && /\/browser-agent\/[a-f0-9]{16}$/.test(req.path)) return true;
+    return false;
+  },
+}));
 
 app.use('/generated', generatedFileRoutes);
 app.use('/health', healthRoutes);
@@ -44,6 +59,7 @@ app.use('/mock/appointments', appointmentRoutes);
 app.use('/mock/transfers', transferRoutes);
 app.use('/sms', smsVerificationRoutes);
 app.use('/api/widget', widgetDemoRoutes);
+app.use('/dev', devLauncherRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

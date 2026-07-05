@@ -6,7 +6,14 @@
   "scripts": {
     "dev": "nodemon --quiet src/server.js",
     "start": "node src/server.js",
-    "test:agent-router": "node tests/agentCaseRouter.test.js"
+    "test:agent-router": "node tests/agentCaseRouter.test.js",
+    "test:browser-routing": "node tests/browserRouting.test.js",
+    "demo:supervisor": "node scripts/run-supervisor-demo.js",
+    "agent:task": "node scripts/run-agent-task.js",
+    "agent:tasks:fr": "node scripts/run-agent-task.js --file tests/agent/complex-fr-tasks.txt",
+    "test:ask-retrieval": "node tests/askRetrieval.test.js",
+    "test:ask-supervisor": "node tests/askSupervisorAcceptance.test.js",
+    "test:all:once": "node tests/askRetrieval.test.js && node tests/siteIndexAgent.test.js && node tests/browserRouting.test.js && node scripts/run-agent-task.js --file tests/agent/complex-fr-tasks.txt"
   },
   "keywords": [],
   "author": "",

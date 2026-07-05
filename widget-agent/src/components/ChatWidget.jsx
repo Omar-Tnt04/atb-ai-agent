@@ -3,17 +3,40 @@ import atbLogo from '../assets/atb-logo.png';
 import {
   EMPTY_AGENT_CONTEXT,
   cancelAgentAction,
+  clearAllWidgetState,
+  clearChatState,
   confirmAgentAction,
   deriveAgentContext,
+  clearPageGoalResume,
+  dispatchPageActions,
   executePreparedAction,
+  fetchBrowserAgentJob,
+  triggerBrowserAgentJobStart,
   getAgentErrorMessage,
   openDownloadUrl,
+  readChatState,
+  readPageGoalResume,
+  requestPageSnapshot,
+  requestSiteContext,
+  savePageGoalResume,
+  saveChatState,
   sendAgentMessage,
   stripPrivateResourceFields,
   verifyAndExecuteAgentAction,
 } from '../services/agentApi.js';
+import {
+  buildCacheContext,
+  getMode,
+  getSiteContext,
+  saveContactFacts,
+  saveDocumentIndex,
+  saveSiteContext,
+  setMode,
+} from '../services/widgetCache.js';
 import MessageBubble from './MessageBubble.jsx';
-import TypingIndicator from './TypingIndicator.jsx';
+import StatusIndicator from './StatusIndicator.jsx';
+import { useCyclingStatus } from '../hooks/useCyclingStatus.js';
+import { selectLoadingSequence, BROWSER_AGENT_SEQUENCE } from '../utils/loadingStatus.js';
 
 const UI_TEXT = {
   title: 'Arab Tunisian Bank AI Agent',
@@ -30,6 +53,7 @@ const UI_TEXT = {
   cancel: 'Cancel',
   send: 'Send message',
   close: 'Close widget',
+  refresh: 'New conversation',
   openLauncher: 'Open ATB Assistant',
   closeLauncher: 'Close ATB Assistant',
 };
@@ -83,9 +107,7 @@ function buildConversationHistory(messages) {
 }
 
 function clearMessageActions(messages) {
-  return messages.map((message) =>
-    message.quickActions?.length ? { ...message, quickActions: [] } : message,
-  );
+  return messages;
 }
 
 function formatMoney(amount, currency = 'TND') {
@@ -176,12 +198,23 @@ const isProceedCommand = (text) =>
     'submit it',
     'yes do it',
     'ok do it',
+    'yes confirm',
+    'ok confirm',
+    'confirm it',
   ].includes(normalizedCommand(text));
 
 function CloseIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
       <path d="m7.4 6 10.6 10.6-1.4 1.4L6 7.4 7.4 6Zm10.6 1.4L7.4 18 6 16.6 16.6 6 18 7.4Z" />
+    </svg>
+  );
+}
+
+function RefreshIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z" />
     </svg>
   );
 }
@@ -194,11 +227,22 @@ function SendIcon() {
   );
 }
 
+// Max age for a saved pendingBrowserJob before it is discarded without backend verification.
+const PENDING_JOB_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
 function ChatWidget() {
-  const [isOpen, setIsOpen] = useState(false);
+  // Restore any conversation stashed before the host page navigated (iframe reload resets React).
+  const [restored] = useState(() => readChatState());
+  // When a pendingBrowserJob exists in restored state, we NEVER blindly restore it — we verify
+  // with the backend first. Until verification completes, start with clean defaults to avoid
+  // showing stale failed/done messages to the user. Normal conversations (no pending job) restore
+  // immediately as before.
+  const hasPendingJob = Boolean(restored?.pendingBrowserJob?.jobId);
+  const [isOpen, setIsOpen] = useState(() => hasPendingJob ? false : (restored?.isOpen ?? false));
   const [isClosing, setIsClosing] = useState(false);
-  const [hasOpened, setHasOpened] = useState(false);
-  const [messages, setMessages] = useState([]);
+  const [hasOpened, setHasOpened] = useState(() => hasPendingJob ? false : (restored?.hasOpened ?? false));
+  const [messages, setMessages] = useState(() => hasPendingJob ? [] : (restored?.messages ?? []));
+  const [agentMode, setAgentMode] = useState(() => getMode());
   const [inputValue, setInputValue] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [agentContext, setAgentContext] = useState(EMPTY_AGENT_CONTEXT);
@@ -208,7 +252,16 @@ function ChatWidget() {
   const [smsCode, setSmsCode] = useState('');
   const [smsError, setSmsError] = useState('');
   const [pendingFieldAction, setPendingFieldAction] = useState(null);
-  const conversationId = useMemo(() => createId('conversation'), []);
+  const [pendingBrowserJob, setPendingBrowserJob] = useState(null);
+  const [animatingId, setAnimatingId] = useState(null);
+  const [loadingSequence, setLoadingSequence] = useState([]);
+  const loadingStatus = useCyclingStatus(isTyping, loadingSequence);
+  const conversationId = useMemo(
+    () => restored?.conversationId || createId('conversation'),
+    [restored],
+  );
+  const browserPollRef = useRef(null);
+  const abandonRef = useRef(false);
   const inputRef = useRef(null);
   const transcriptRef = useRef(null);
   const closeTimerRef = useRef(null);
@@ -280,16 +333,18 @@ function ChatWidget() {
     isError = false,
     actionContext = null,
     smsChallenge = null,
+    animate = false,
   }) => {
-    setMessages((currentMessages) => [
-      ...clearMessageActions(currentMessages),
-      createMessage('bot', text || UI_TEXT.fallback, {
-        quickActions,
-        isError,
-        actionContext,
-        smsChallenge,
-      }),
-    ]);
+    const botMessage = createMessage('bot', text || UI_TEXT.fallback, {
+      quickActions,
+      isError,
+      actionContext,
+      smsChallenge,
+    });
+    if (animate) {
+      setAnimatingId(botMessage.id);
+    }
+    setMessages((currentMessages) => [...clearMessageActions(currentMessages), botMessage]);
   };
 
   const appendErrorMessage = (error) => {
@@ -351,8 +406,248 @@ function ChatWidget() {
       text: response.text || text.fallback,
       quickActions: response.quickActions,
       actionContext: response.actionContext,
+      animate: true,
     });
   };
+
+  const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+  // Drive a backend browser-use job to completion. Keeps the typing/loading state up, polls for the
+  // result, and renders the final answer. Survives a host-page navigation: the jobId is persisted in
+  // sessionStorage and a freshly-injected widget resumes polling the same job on mount.
+  const pollBrowserJob = async (jobId) => {
+    if (!jobId || browserPollRef.current === jobId) {
+      if (jobId && browserPollRef.current === jobId) console.log('[WIDGET] polling already active for job:', jobId);
+      return;
+    }
+    browserPollRef.current = jobId;
+    setIsTyping(true);
+    setLoadingSequence(BROWSER_AGENT_SEQUENCE);
+
+    const deadline = Date.now() + 270_000;
+    try {
+      while (Date.now() < deadline) {
+        await sleep(2500);
+        const data = await fetchBrowserAgentJob(jobId);
+        const status = data?.status;
+
+        if (status === 'browser_agent_done') {
+          appendAssistantMessage({ text: data.assistantMessage || text.fallback, animate: true });
+          return;
+        }
+        if (status === 'browser_agent_error' || status === 'not_found') {
+          appendAssistantMessage({
+            text: "I couldn't finish that on the ATB website. Please try again.",
+            isError: true,
+          });
+          return;
+        }
+        // browser_agent_running → keep polling.
+      }
+      appendAssistantMessage({
+        text: 'The website request is taking longer than expected. Please try again.',
+        isError: true,
+      });
+    } finally {
+      browserPollRef.current = null;
+      setPendingBrowserJob(null);
+      setIsTyping(false);
+      // Clear bridge state from atb.tn localStorage — job is done.
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
+      }
+    }
+  };
+
+  // Persist the conversation so a host-page navigation (which reloads the iframe) doesn't wipe it.
+  // Force isOpen=true when a browser-use job is active so the widget always reopens after navigation.
+  useEffect(() => {
+    if (!hasOpened && messages.length === 0 && !pendingBrowserJob) {
+      return;
+    }
+    const stateIsOpen = pendingBrowserJob ? true : isOpen;
+    saveChatState({ isOpen: stateIsOpen, hasOpened, messages, conversationId, pendingBrowserJob });
+  }, [isOpen, hasOpened, messages, conversationId, pendingBrowserJob]);
+
+  // Mount-time browser-use job handling. Three paths:
+  //
+  // A) localStorage has a pendingBrowserJob → verify with backend before restoring.
+  //    - TTL expired (>10 min): clear storage silently, start fresh.
+  //    - Backend says running: restore messages + state, resume polling.
+  //    - Backend says done/failed/not_found: clear storage, start fresh (no stale messages shown).
+  //
+  // B) localStorage had nothing BUT content.js bridge may have state → listen for
+  //    ATB_WIDGET_BRIDGE_RESTORE (fired when browser-use just navigated the host tab).
+  //    Bridge restore is trusted without backend re-check (it's an immediate-navigation path).
+  //
+  // C) Neither → widget starts clean.
+  useEffect(() => {
+    const job = restored?.pendingBrowserJob;
+    console.log('[ATB_WIDGET_APP] mount: hasPendingJob =', Boolean(job?.jobId), job?.jobId ? '(jobId=' + job.jobId + ')' : '');
+
+    const discardStaleJob = (reason) => {
+      console.log('[ATB_WIDGET_APP] stale job cleared:', reason);
+      clearChatState();
+      setMessages([]);
+      setPendingBrowserJob(null);
+      setIsTyping(false);
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
+      }
+    };
+
+    if (job?.jobId) {
+      // Path A — localStorage has a pending job. Verify before restoring.
+      if (job.createdAt && Date.now() - job.createdAt > PENDING_JOB_TTL_MS) {
+        discardStaleJob('TTL exceeded (' + Math.round((Date.now() - job.createdAt) / 60000) + ' min old)');
+        return undefined;
+      }
+      let cancelled = false;
+      (async () => {
+        try {
+          const data = await fetchBrowserAgentJob(job.jobId);
+          if (cancelled || abandonRef.current) return;
+          const status = data?.status;
+          console.log('[ATB_WIDGET_APP] job verification: status =', status);
+          if (status === 'browser_agent_running') {
+            // Job still running — resume polling only. Do NOT call /start again;
+            // the agent process is already running and a second /start spawns a duplicate.
+            console.log('[ATB_WIDGET_APP] resumed polling for job:', job.jobId);
+            console.log('[WIDGET] start ignored, job already running:', job.jobId);
+            setMessages(restored.messages ?? []);
+            setHasOpened(true);
+            setIsOpen(true);
+            setIsTyping(true);
+            setLoadingSequence(BROWSER_AGENT_SEQUENCE);
+            setPendingBrowserJob(job);
+            pollBrowserJob(job.jobId);
+          } else if (status === 'browser_agent_done') {
+            // Job finished while the host page was navigating — show result, don't discard.
+            console.log('[ATB_WIDGET_APP] job done at verification — showing result');
+            setMessages(restored.messages ?? []);
+            setHasOpened(true);
+            setIsOpen(true);
+            setIsTyping(false);
+            appendAssistantMessage({ text: data?.assistantMessage || text.fallback, animate: true });
+            clearChatState();
+            if (window.parent !== window) {
+              window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
+            }
+          } else {
+            discardStaleJob('job status = ' + status);
+          }
+        } catch {
+          if (!cancelled) discardStaleJob('network error verifying job');
+        }
+      })();
+      return () => { cancelled = true; };
+    }
+
+    // Path B — no localStorage pending job. Listen for bridge restore from content.js.
+    console.log('[ATB_WIDGET_APP] no localStorage pending job — listening for bridge restore');
+    const onBridgeRestore = (event) => {
+      const msg = event.data || {};
+      if (msg.type !== 'ATB_WIDGET_BRIDGE_RESTORE' || !msg.state?.pendingBrowserJob?.jobId) return;
+      const bridgeJob = msg.state.pendingBrowserJob;
+      console.log('[ATB_WIDGET_APP] bridge restore received, jobId:', bridgeJob.jobId);
+      // Bridge restore means the host page just navigated — the agent is already running.
+      // Resume polling only. Do NOT call /start again; that spawns a duplicate agent.
+      if (browserPollRef.current === bridgeJob.jobId) {
+        console.log('[WIDGET] polling already active for job:', bridgeJob.jobId);
+        return;
+      }
+      console.log('[WIDGET] start ignored, job already running:', bridgeJob.jobId);
+      setHasOpened(true);
+      setIsOpen(true);
+      setIsTyping(true);
+      setLoadingSequence(BROWSER_AGENT_SEQUENCE);
+      setPendingBrowserJob(bridgeJob);
+      if (Array.isArray(msg.state.messages) && msg.state.messages.length > 0) {
+        setMessages(msg.state.messages);
+      }
+      pollBrowserJob(bridgeJob.jobId);
+    };
+    window.addEventListener('message', onBridgeRestore);
+    return () => window.removeEventListener('message', onBridgeRestore);
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Dev reset: content.js sends ATB_WIDGET_DEV_RESET when __atbWidgetReset() is called from
+  // the ATB page console. Clears all iframe-side widget localStorage keys.
+  useEffect(() => {
+    const onDevReset = (event) => {
+      const msg = event.data || {};
+      if (msg.type !== 'ATB_WIDGET_DEV_RESET') return;
+      clearAllWidgetState();
+      console.log('[ATB_WIDGET_APP] dev reset applied — reload page to start fresh');
+    };
+    window.addEventListener('message', onDevReset);
+    return () => window.removeEventListener('message', onDevReset);
+  }, []);
+
+  // Fresh-tab reset: content.js sends ATB_WIDGET_FORCE_FRESH when the tab was closed and
+  // reopened (not a same-tab navigation). Discard any pending job from a prior session.
+  useEffect(() => {
+    const onForceFresh = (event) => {
+      if ((event.data || {}).type !== 'ATB_WIDGET_FORCE_FRESH') return;
+      console.log('[WIDGET] force fresh — discarding pending job from prior session');
+      abandonRef.current = true;
+      clearChatState();
+      if (window.parent !== window) {
+        window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
+      }
+    };
+    window.addEventListener('message', onForceFresh);
+    return () => window.removeEventListener('message', onForceFresh);
+  }, []);
+
+  // Resume a navigation-based goal after the host page reloaded. If a fresh breadcrumb exists, the
+  // widget re-evaluates the same customer goal on the page it just landed on and points out the
+  // next relevant step (with navigated:true so the backend won't navigate again). Best-effort and
+  // guarded — when there's no breadcrumb (the normal case) nothing happens.
+  useEffect(() => {
+    const resume = readPageGoalResume();
+    if (!resume || !resume.message) return undefined;
+    clearPageGoalResume();
+
+    let cancelled = false;
+    (async () => {
+      // Give the freshly-loaded page a moment to render before snapshotting.
+      await new Promise((resolve) => window.setTimeout(resolve, 600));
+      if (cancelled) return;
+      setIsTyping(true);
+      try {
+        const snapshot = await requestPageSnapshot();
+        if (!snapshot || cancelled) return;
+        const response = await sendAgentMessage({
+          message: resume.message,
+          conversationId: resume.conversationId || conversationId,
+          conversationHistory: [],
+          agentContext: {},
+          profileContext: {},
+          payload: {},
+          pageSnapshot: snapshot,
+          pageGoalState: { ...(resume.goalState || {}), navigated: true },
+        });
+        const actions = response.raw?.pagePlan?.actions;
+        if (Array.isArray(actions) && actions.length) {
+          await dispatchPageActions(actions);
+        }
+        if (!cancelled) appendNormalizedAssistantResponse(response);
+      } catch {
+        /* resume is best-effort; ignore failures */
+      } finally {
+        if (!cancelled) setIsTyping(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleExecutionResponse = (response) => {
     const raw = response.raw || {};
@@ -362,9 +657,12 @@ function ChatWidget() {
       setPendingFieldAction(null);
       setAgentContext(EMPTY_AGENT_CONTEXT);
       appendAssistantMessage({
-        text: buildCompletionText(raw.data || {}),
+        text: raw.data?.localSimulation && response.text
+          ? response.text
+          : buildCompletionText(raw.data || {}),
         quickActions: response.quickActions,
         actionContext: response.actionContext,
+        animate: true,
       });
       return;
     }
@@ -451,6 +749,26 @@ function ChatWidget() {
       setIsClosing(false);
       closeTimerRef.current = null;
     }, 210);
+  };
+
+  const refreshConversation = () => {
+    console.log('[WIDGET] refresh conversation');
+    browserPollRef.current = null;
+    abandonRef.current = false;
+    setIsTyping(false);
+    setMessages([]);
+    setPendingBrowserJob(null);
+    setPendingAction(null);
+    setPendingConfirmation(null);
+    setPendingSms(null);
+    setSmsCode('');
+    setSmsError('');
+    setPendingFieldAction(null);
+    setLoadingSequence([]);
+    clearAllWidgetState();
+    if (window.parent !== window) {
+      window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
+    }
   };
 
   const handleContinueAction = async ({ appendUser = false } = {}) => {
@@ -599,10 +917,9 @@ function ChatWidget() {
       pendingAction: pendingFieldAction || agentContext?.pendingAction || null,
     };
 
-    setMessages((currentMessages) => [
-      ...clearMessageActions(currentMessages),
-      createMessage('user', trimmedMessage),
-    ]);
+    // Create the message object once so we can reference it for the synchronous state save below.
+    const userMessage = createMessage('user', trimmedMessage);
+    setMessages((currentMessages) => [...clearMessageActions(currentMessages), userMessage]);
     setInputValue('');
 
     if (
@@ -625,17 +942,112 @@ function ChatWidget() {
       }
     }
 
+    setLoadingSequence(selectLoadingSequence({ message: trimmedMessage, hasFiles: false }));
     setIsTyping(true);
 
+    // When we hand a browser-use job off to the polling loop, the poller owns the typing state — so
+    // the finally below must NOT switch it off.
+    let handedOffToPoll = false;
+
     try {
-      const response = await sendAgentMessage({
-        message: trimmedMessage,
-        conversationId,
-        conversationHistory,
-        profileContext: {},
-        agentContext: outgoingAgentContext,
-        payload: {},
-      });
+      // Multi-step same-page goal loop. Each step: snapshot → backend infers the customer goal and
+      // returns a safe plan → run the actions (scroll/highlight/open document) and WAIT for the host
+      // page to confirm before rendering. Loops only while the backend asks to ('continue'); stops
+      // on a finished plan, on a safe navigation (the page reloads and the goal resumes), or after
+      // MAX_STEPS. Returns null snapshot when not embedded → single normal/browser-use request.
+      const MAX_STEPS = 4;
+      let pageSnapshot = await requestPageSnapshot();
+      let goalState = null;
+      let response = null;
+
+      // Ask mode: gather site context from cache or fresh DOM extraction.
+      // Act mode skips this — it uses browser-use to interact with the page directly.
+      let siteContext = null;
+      if (agentMode === 'ask') {
+        const cached = getSiteContext();
+        if (cached) {
+          siteContext = cached.ctx;
+        } else {
+          siteContext = await requestSiteContext();
+          if (siteContext) saveSiteContext(siteContext);
+        }
+      }
+
+      for (let step = 0; step < MAX_STEPS; step += 1) {
+        response = await sendAgentMessage({
+          message: trimmedMessage,
+          conversationId,
+          conversationHistory,
+          profileContext: {},
+          agentContext: outgoingAgentContext,
+          payload: {},
+          pageSnapshot,
+          pageGoalState: goalState,
+          mode: agentMode,
+          cacheContext: buildCacheContext(),
+          siteContext,
+        });
+
+        // Two-phase browser-use start. Backend returned a QUEUED job — python not running yet.
+        // 1. Synchronously persist chat state to sessionStorage (isOpen, messages, jobId) BEFORE
+        //    calling /start, because once python runs it can navigate the host tab immediately.
+        // 2. Only after the persist call do we fire /start and begin polling.
+        if (response.raw?.status === 'browser_agent_queued' && response.raw?.jobId) {
+          const jobId = response.raw.jobId;
+          const newBrowserJob = { jobId, message: trimmedMessage, createdAt: Date.now() };
+          const stateToSave = {
+            isOpen: true,
+            hasOpened: true,
+            messages: [...messages, userMessage],
+            conversationId,
+            pendingBrowserJob: newBrowserJob,
+          };
+          // `messages` is the stale pre-render closure value; include userMessage manually.
+          saveChatState(stateToSave);
+          // Also save via parent-page bridge (atb.tn localStorage via content.js).
+          // Reliable fallback in case the iframe's partitioned localStorage is empty after reload.
+          if (window.parent !== window) {
+            window.parent.postMessage({
+              type: 'ATB_WIDGET_SAVE_BRIDGE',
+              state: { pendingBrowserJob: newBrowserJob, isOpen: true, messages: stateToSave.messages },
+            }, '*');
+          }
+          setPendingBrowserJob(newBrowserJob);
+          handedOffToPoll = true;
+          await triggerBrowserAgentJobStart(jobId);
+          pollBrowserJob(jobId);
+          return;
+        }
+
+        const plan = response.raw?.pagePlan;
+        const actions = plan?.actions;
+        if (Array.isArray(actions) && actions.length) {
+          await dispatchPageActions(actions);
+        }
+
+        // Safe navigation: the host page is about to reload. Save the goal so the widget resumes it
+        // on the new page, then stop — this step's answer is already prepared.
+        if (plan?.status === 'navigated') {
+          savePageGoalResume({
+            message: trimmedMessage,
+            conversationId,
+            goalState: plan.goalState || null,
+          });
+          break;
+        }
+
+        // Stop unless the backend explicitly wants another same-page step.
+        if (!pageSnapshot || plan?.status !== 'continue') break;
+
+        // Let the DOM settle, rebuild the snapshot, and continue the goal.
+        await new Promise((resolve) => window.setTimeout(resolve, 350));
+        pageSnapshot = await requestPageSnapshot();
+        goalState = plan.goalState || null;
+      }
+
+      // Persist cache-worthy data returned by backend
+      if (response.raw?.contactFacts) saveContactFacts(response.raw.contactFacts);
+      if (response.raw?.documentIndex) saveDocumentIndex(response.raw.documentIndex);
 
       applyChatResponseState(response);
       setAgentContext((currentContext) => deriveAgentContext(currentContext, response));
@@ -643,7 +1055,9 @@ function ChatWidget() {
     } catch (error) {
       appendErrorMessage(error);
     } finally {
-      setIsTyping(false);
+      if (!handedOffToPoll) {
+        setIsTyping(false);
+      }
     }
   };
 
@@ -896,6 +1310,15 @@ function ChatWidget() {
               <button
                 className="chat-icon-button"
                 type="button"
+                onClick={refreshConversation}
+                aria-label={text.refresh}
+                title={text.refresh}
+              >
+                <RefreshIcon />
+              </button>
+              <button
+                className="chat-icon-button"
+                type="button"
                 onClick={closeWidget}
                 aria-label={text.close}
               >
@@ -923,13 +1346,32 @@ function ChatWidget() {
                         : null,
                   }}
                   onAction={handleMessageAction}
+                  animate={message.role === 'bot' && message.id === animatingId}
                 />
               ))}
-              {isTyping && <TypingIndicator />}
+              {isTyping && <StatusIndicator status={loadingStatus} />}
             </div>
           </div>
 
           <form className="chat-input-form" onSubmit={handleSubmit}>
+            <div className="mode-toggle" role="group" aria-label="Agent mode">
+              <button
+                type="button"
+                className={`mode-toggle-btn${agentMode === 'ask' ? ' mode-toggle-active' : ''}`}
+                onClick={() => { setAgentMode('ask'); setMode('ask'); }}
+                disabled={isTyping}
+              >
+                Ask question
+              </button>
+              <button
+                type="button"
+                className={`mode-toggle-btn${agentMode === 'act' ? ' mode-toggle-active' : ''}`}
+                onClick={() => { setAgentMode('act'); setMode('act'); }}
+                disabled={isTyping}
+              >
+                Act on site
+              </button>
+            </div>
             <input
               ref={inputRef}
               value={inputValue}

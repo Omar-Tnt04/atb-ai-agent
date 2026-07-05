@@ -280,5 +280,6 @@ const buildFileContext = async (files = []) => {
 
 module.exports = {
   buildFileContext,
+  recognizeImageBuffer,
   shutdownOcrWorker,
 };

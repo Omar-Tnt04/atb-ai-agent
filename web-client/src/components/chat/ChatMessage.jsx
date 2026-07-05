@@ -2,6 +2,8 @@ import ResultCard from '../ResultCard.jsx';
 import AssistantAvatar from './AssistantAvatar.jsx';
 import MarkdownContent from './MarkdownContent.jsx';
 import UserAvatar from './UserAvatar.jsx';
+import { useTypewriter } from '../../hooks/useTypewriter.js';
+import { balanceMarkdown } from '../../utils/markdownBalance.js';
 
 const getQuickReplyUrl = (reply = {}) =>
   reply.url || reply.downloadUrl || reply.fileUrl || '';
@@ -53,8 +55,12 @@ function ChatMessage({
   onQuickReply = () => {},
   profile,
   user,
+  animate = false,
 }) {
   const isUser = message.sender === 'user';
+  const shouldAnimate = animate && !isUser && message.status !== 'error';
+  const { visible, done } = useTypewriter(message.text, { enabled: shouldAnimate });
+  const renderedText = shouldAnimate && !done ? balanceMarkdown(visible) : message.text;
 
   const formatFileSize = (size) => {
     if (!Number.isFinite(size)) {
@@ -80,7 +86,7 @@ function ChatMessage({
     <div className={`chat-row ${isUser ? 'chat-row-user' : 'chat-row-assistant'}`}>
       {!isUser ? <AssistantAvatar /> : null}
       <div className={`message ${isUser ? 'message-user' : 'message-agent'}`}>
-        {isUser ? <p>{message.text}</p> : <MarkdownContent content={message.text} />}
+        {isUser ? <p>{message.text}</p> : <MarkdownContent content={renderedText} />}
 
         {message.attachments?.length ? (
           <div className="message-attachments">

@@ -29,6 +29,25 @@ TEXT_LENGTH_ONLY_KEY_PATTERN = re.compile(
 
 MAX_STRING_LENGTH = 160
 MAX_PREVIEW_LENGTH = 120
+COMPACT_METRIC_KEYS = {
+    "requestId",
+    "threadId",
+    "routeType",
+    "requestKind",
+    "mode",
+    "endpoint",
+    "selectedModel",
+    "selected_model",
+    "model",
+    "latencyMs",
+    "fileType",
+    "mimeType",
+    "ocrTextLength",
+    "extractedFieldCount",
+    "errorCode",
+    "status",
+    "statusCode",
+}
 
 
 def _log_dir() -> Path:
@@ -110,6 +129,31 @@ def maskLogPayload(payload: Any, key: str = "") -> Any:
     return _truncate(text)
 
 
+def _compact_architecture_metrics(payload: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+
+    compact = {
+        key: maskLogPayload(value, key)
+        for key, value in payload.items()
+        if key in COMPACT_METRIC_KEYS
+    }
+
+    if "routeType" not in compact and payload.get("event") is not None:
+        compact["routeType"] = maskLogPayload(payload.get("event"), "routeType")
+    if "selectedModel" not in compact and payload.get("selected_model") is not None:
+        compact["selectedModel"] = maskLogPayload(payload.get("selected_model"), "selectedModel")
+    if "fileType" not in compact and payload.get("mimeType") is not None:
+        mime_type = str(payload.get("mimeType") or "")
+        compact["fileType"] = "image" if mime_type.startswith("image/") else "pdf" if "pdf" in mime_type else "unknown"
+    if "errorCode" not in compact:
+        error_code = payload.get("code") or payload.get("errorCode") or payload.get("errorType")
+        if error_code is not None:
+            compact["errorCode"] = maskLogPayload(error_code, "errorCode")
+
+    return compact
+
+
 def _write(path: Path, line: str) -> None:
     if not _enabled():
         return
@@ -124,7 +168,7 @@ def _write(path: Path, line: str) -> None:
 def logArchitecture(eventName: str, payload: dict[str, Any] | None = None, level: str = "info") -> None:
     if not _enabled():
         return
-    data = maskLogPayload(payload or {})
+    data = _compact_architecture_metrics(payload or {})
     timestamp = datetime.now(timezone.utc).isoformat()
     request_id = data.get("requestId") or "no-request-id"
     message = data.get("message") or eventName

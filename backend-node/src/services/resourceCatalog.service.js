@@ -1,4 +1,5 @@
-const axios = require('axios');
+const fs = require('fs/promises');
+const path = require('path');
 const env = require('../config/env');
 const { findAliasMatchesInCatalog, scoreAliasForTitle } = require('./resourceAlias.service');
 const { logArchitecture } = require('./architectureLogger.service');
@@ -8,9 +9,23 @@ const RESOURCE_SERVER_BASE_URL = env.resourceServerBaseUrl;
 const RESOURCE_JSON_BASE_URL = env.resourceJsonBaseUrl;
 const RESOURCE_DOCUMENT_BASE_URL = env.resourceDocumentBaseUrl;
 const JSON_RESOURCE_BASE_URL = `${RESOURCE_JSON_BASE_URL}/`;
-const CATALOG_URL = `${RESOURCE_JSON_BASE_URL}/catalog.json`;
-const REQUEST_TIMEOUT_MS = 3000;
+const CATALOG_URL = env.resourceCatalogPath;
 const MIN_MATCH_SCORE = 10;
+const ALLOWED_CATALOG_FOLDERS = new Set(['documents', 'json', 'txt', 'images']);
+const ALLOWED_CATALOG_EXTENSIONS = new Set(['.pdf', '.json', '.txt', '.png', '.jpg', '.jpeg']);
+let catalogStartupLogged = false;
+const debugResourceSearchLog = (...args) => {
+  if (env.debugResourceSearch) {
+    console.log(...args);
+  }
+};
+const APPROVED_RESOURCE_MATCH_FIELDS = [
+  'description',
+  'exampleQueries',
+  'title',
+  'category',
+  'intents',
+];
 const GENERIC_QUERY_TERMS = new Set([
   'receipt',
   'document',
@@ -23,7 +38,7 @@ const GENERIC_QUERY_TERMS = new Set([
 ]);
 
 class ResourceCatalogUnavailableError extends Error {
-  constructor(message = 'Resource server is not reachable') {
+  constructor(message = 'Laragon resource catalog is unavailable') {
     super(message);
     this.name = 'ResourceCatalogUnavailableError';
     this.code = 'RESOURCE_SERVER_UNREACHABLE';
@@ -38,6 +53,7 @@ const STOP_WORDS = new Set([
   'can',
   'could',
   'do',
+  'does',
   'for',
   'from',
   'get',
@@ -49,8 +65,11 @@ const STOP_WORDS = new Set([
   'me',
   'my',
   'of',
-  'pay',
   'please',
+  'read',
+  'recommend',
+  'recommends',
+  'recommended',
   'show',
   'summarize',
   'summary',
@@ -170,11 +189,12 @@ const MONTHS = [
   'december',
 ];
 
-let catalogCache = null;
-let catalogCacheExpiresAt = 0;
-
+// Fold accents (NFD) so accented catalog text tokenizes to the same ASCII tokens
+// as a plain query ("crédit" → "credit"). No-op for pure-ASCII text.
 const normalizeText = (value = '') =>
   String(value || '')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
     .toLowerCase()
     .replace(/[_-]+/g, ' ')
     .replace(/[^a-z0-9\s]+/g, ' ')
@@ -189,13 +209,101 @@ const tokenize = (value = '') =>
     .split(/\s+/)
     .filter((token) => token.length >= 2 && !STOP_WORDS.has(token));
 
+// Whole-word containment: avoids "pick" matching "pickup" or "card" matching
+// "discard". Used for precise title-anchor scoring.
+const wholeWordIncludes = (text = '', token = '') => {
+  if (!text || !token) return false;
+  return new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(text);
+};
+
+const SEARCH_QUERY_FILLERS = new Set([
+  ...STOP_WORDS,
+  'about',
+  'answer',
+  'ask',
+  'can',
+  'check',
+  'could',
+  'display',
+  'fetch',
+  'find',
+  'give',
+  'mine',
+  'open',
+  'question',
+  'read',
+  'retrieve',
+  'tell',
+  'view',
+]);
+
+const GENERIC_RESOURCE_QUERY_TERMS = new Set([
+  ...GENERIC_QUERY_TERMS,
+  'bill',
+  'certificate',
+  'detail',
+  'details',
+  'file',
+  'guide',
+  'image',
+  'notice',
+  'pdf',
+  'policy',
+  'read',
+  'record',
+  'request',
+  'show',
+  'status',
+  'summary',
+  // field-request words: asking for a field value shouldn't penalise image resources
+  'amount',
+  'balance',
+  'billing',
+  'date',
+  'estimated',
+  'include',
+  'merchant',
+  'number',
+  'percentage',
+  'progress',
+  'recommendation',
+  'saved',
+  'scheduled',
+  'target',
+  'threshold',
+  'time',
+  'transaction',
+  'wait',
+]);
+
+const normalizeResourceSearchQuery = (value = '') => {
+  const text = normalizeText(value)
+    .replace(/^(what|which)\s+(is|are|was|were)\s+/g, ' ')
+    .replace(/^what\s+does\s+/g, ' ')
+    .replace(/^what\s+do\s+/g, ' ')
+    .replace(/^(show|get|find|open|summarize|view|display|fetch|download)\s+(me\s+)?/g, ' ')
+    .replace(/\b(recommend|recommends|recommended|summary|summarize)\b/g, ' ');
+
+  const tokens = text
+    .split(/\s+/)
+    // Keep pure-digit tokens (e.g. the "1" in "Lac 1") — branch/account identifiers matter.
+    .filter((token) => (token.length >= 2 || /^\d+$/.test(token)) && !SEARCH_QUERY_FILLERS.has(token))
+    .map((token) => {
+      if (['payments', 'receipts', 'documents', 'statements', 'certificates', 'notices'].includes(token)) {
+        return token.slice(0, -1);
+      }
+      return token;
+    });
+
+  return unique(tokens).join(' ').trim();
+};
+
 const unique = (values) => Array.from(new Set(values.filter(Boolean)));
 
 const hasPhrase = (text = '', phrase = '') =>
   text.includes(normalizeText(phrase));
 
-const isUnsupportedImageResourceQuery = (messageText = '') =>
-  /\b(image|photo|picture|scan|scanned|screenshot)\b/.test(normalizeText(messageText));
+const isUnsupportedImageResourceQuery = () => false;
 
 const ruleMatchesMessage = (rule, messageText = '') => {
   const text = normalizeText(messageText);
@@ -220,6 +328,11 @@ const QUERY_SYNONYMS = {
   sheet: ['sheet', 'product', 'package', 'pack'],
   rib: ['rib', 'certificate', 'bank details'],
   certificate: ['certificate', 'rib', 'bank details'],
+  water: ['water', 'sonede', 'utility'],
+  electricity: ['electricity', 'steg', 'utility'],
+  telecom: ['telecom', 'telephone', 'internet'],
+  phone: ['phone', 'telephone', 'hotline'],
+  internet: ['internet', 'telecom', 'online'],
 };
 
 const RESOURCE_OPTION_TYPES = {
@@ -366,208 +479,277 @@ const expandQueryParts = (messageText = '') => {
   return unique(parts.flatMap((part) => tokenize(part)));
 };
 
-const getUrlFileName = (value = '') => {
+const isSafeCatalogPathPart = (value = '') => {
   const text = String(value || '').trim();
-  if (!text) return null;
+  if (!text) return false;
+  if (text.includes('..') || text.includes('/') || text.includes('\\')) return false;
+  if (path.isAbsolute(text)) return false;
+  return true;
+};
 
-  try {
-    return new URL(text).pathname.split('/').pop() || null;
-  } catch {
-    return text.split(/[\\/]/).pop() || null;
+const normalizeCatalogFileType = (file = {}) => {
+  const explicit = normalizeText(file.fileType || '');
+  if (['pdf', 'json', 'txt', 'image'].includes(explicit)) return explicit;
+  const ext = path.extname(file.fileName || '').toLowerCase();
+  if (ext === '.pdf') return 'pdf';
+  if (ext === '.json') return 'json';
+  if (ext === '.txt') return 'txt';
+  if (['.png', '.jpg', '.jpeg'].includes(ext)) return 'image';
+  return explicit || 'unknown';
+};
+
+const buildCatalogFileUrl = (folder, fileName) => {
+  if (!folder || !fileName) return null;
+  if (!ALLOWED_CATALOG_FOLDERS.has(folder)) return null;
+  if (!isSafeCatalogPathPart(folder) || !isSafeCatalogPathPart(fileName)) return null;
+  const ext = path.extname(fileName).toLowerCase();
+  if (!ALLOWED_CATALOG_EXTENSIONS.has(ext)) return null;
+  return `${RESOURCE_SERVER_BASE_URL}/${folder}/${fileName}`;
+};
+
+const withCatalogFileUrl = (file = {}) => {
+  const fileType = normalizeCatalogFileType(file);
+  const fileUrl = buildCatalogFileUrl(file.folder, file.fileName);
+  if (!fileUrl) return null;
+  return {
+    ...file,
+    fileType,
+    fileUrl,
+  };
+};
+
+const isImageIntent = (messageText = '', route = '') => {
+  const text = normalizeText(messageText);
+  return (
+    route === 'image' ||
+    /\b(qr|image|img|photo|picture|screenshot|scan|scanned|visual|png|jpg|jpeg)\b/.test(text)
+  );
+};
+
+const isDocumentRetrievalIntent = (messageText = '') => {
+  const text = normalizeText(messageText);
+  if (!text) return false;
+  const hasRetrievalVerb = /\b(show|open|view|display|download|get|give|fetch|retrieve|send|provide|share)\b/.test(text);
+  const hasDocumentNoun = /\b(pdf|document|file|form|guide|sheet|policy|notice|certificate|statement|receipt|image)\b/.test(text);
+  const hasContentQuestion = /\b(read|extract|summarize|summary|what|when|which|how much|details?|recommend|contain|say|happened)\b/.test(text);
+  return hasRetrievalVerb && hasDocumentNoun && !hasContentQuestion;
+};
+
+const selectCatalogFile = (files = [], { messageText = '', route = 'text' } = {}) => {
+  const safeFiles = files.map(withCatalogFileUrl).filter(Boolean);
+  if (!safeFiles.length) return null;
+
+  const byType = (type) => safeFiles.find((file) => file.fileType === type);
+  if (isImageIntent(messageText, route)) {
+    return byType('image') || safeFiles[0];
   }
-};
 
-const toCatalogJsonUrl = (value = '') => {
-  const text = String(value || '').trim();
-  if (!text) return null;
-
-  if (/^https?:\/\//i.test(text)) {
-    return text;
+  if (isDocumentRetrievalIntent(messageText)) {
+    return byType('pdf') || byType('json') || byType('txt') || safeFiles[0];
   }
 
-  const fileName = getUrlFileName(text);
-  return fileName ? `${JSON_RESOURCE_BASE_URL}${fileName}` : null;
-};
+  // Natural QA (which/where/when/status/hours/payment/amount): honor the catalog's `preferredFor`
+  // hint so the structured sibling (preferredFor includes "qa"/"field_extraction") is used for
+  // answering, never the view/download PDF. This keeps deterministic builders fed with parsed JSON.
+  const qaPreferred = safeFiles.find(
+    (file) =>
+      Array.isArray(file.preferredFor) &&
+      file.preferredFor.some((hint) => ['qa', 'field_extraction'].includes(normalizeText(hint))),
+  );
+  if (qaPreferred) return qaPreferred;
 
-const deriveJsonUrlFromFileUrl = (value = '') => {
-  const fileName = getUrlFileName(value);
-  if (!fileName) return null;
-
-  const jsonFileName = fileName.replace(/\.[^.]+$/i, '.json');
-  return jsonFileName.endsWith('.json')
-    ? `${JSON_RESOURCE_BASE_URL}${jsonFileName}`
-    : null;
-};
-
-const isAllowedJsonResourceUrl = (urlValue) => {
-  try {
-    const parsed = new URL(urlValue);
-    const jsonBaseUrl = new URL(`${RESOURCE_JSON_BASE_URL}/`);
-    return (
-      parsed.protocol === jsonBaseUrl.protocol &&
-      parsed.host === jsonBaseUrl.host &&
-      parsed.pathname.startsWith(jsonBaseUrl.pathname) &&
-      parsed.pathname.endsWith('.json') &&
-      !parsed.pathname
-        .split('/')
-        .map((segment) => decodeURIComponent(segment))
-        .includes('..')
-    );
-  } catch {
-    return false;
+  for (const type of ['json', 'txt', 'pdf']) {
+    const found = byType(type);
+    if (found) return found;
   }
+  return safeFiles[0];
 };
 
-const fetchText = async (url) => {
-  const response = await axios.get(url, {
-    responseType: 'text',
-    timeout: REQUEST_TIMEOUT_MS,
-    validateStatus: (status) => status >= 200 && status < 300,
-  });
-  return String(response.data || '');
+const selectPrimaryCatalogFile = (files = []) => {
+  const safeFiles = files.map(withCatalogFileUrl).filter(Boolean);
+  if (!safeFiles.length) return null;
+  for (const type of ['json', 'txt', 'pdf', 'image']) {
+    const found = safeFiles.find((file) => file.fileType === type);
+    if (found) return found;
+  }
+  return safeFiles[0];
 };
 
-const fetchJson = async (url) => {
-  const response = await axios.get(url, {
-    responseType: 'json',
-    timeout: REQUEST_TIMEOUT_MS,
-    validateStatus: (status) => status >= 200 && status < 300,
-  });
-  return response.data;
+const normalizeCatalogPolicies = (catalogJson = {}) => ({
+  catalogVersion: catalogJson.catalogVersion || null,
+  generatedAt: catalogJson.generatedAt || null,
+  name: catalogJson.name || null,
+  description: catalogJson.description || null,
+  environment: catalogJson.environment || null,
+  resourceBaseUrlEnv: catalogJson.resourceBaseUrlEnv || null,
+  supportedLanguages: Array.isArray(catalogJson.supportedLanguages)
+    ? catalogJson.supportedLanguages
+    : [],
+  selectionPolicy: catalogJson.selectionPolicy || {},
+  routingPolicy: catalogJson.routingPolicy || {},
+});
+
+const normalizeResourceRelatedActions = (resource = {}) =>
+  Array.isArray(resource.relatedActions)
+    ? resource.relatedActions
+    : [];
+
+const inferCatalogResourceFileType = (files = []) => {
+  const safeFiles = files.map(withCatalogFileUrl).filter(Boolean);
+  if (safeFiles.some((file) => file.fileType === 'image')) return 'image';
+  if (safeFiles.some((file) => file.fileType === 'json')) return 'json';
+  if (safeFiles.some((file) => file.fileType === 'txt')) return 'txt';
+  if (safeFiles.some((file) => file.fileType === 'pdf')) return 'pdf';
+  return safeFiles[0]?.fileType || 'json';
 };
 
-const parseDirectoryListing = (html = '') => {
-  const fileNames = [];
-  const hrefPattern = /href=["']([^"']+\.json)["']/gi;
-  let match;
-
-  while ((match = hrefPattern.exec(html)) !== null) {
-    const rawHref = match[1];
-    const fileName = decodeURIComponent(rawHref.split('/').pop() || '');
-
-    if (fileName && fileName !== 'catalog.json' && fileName.endsWith('.json')) {
-      fileNames.push(fileName);
+const inferCatalogResourceType = (resource = {}, resourceFileType = 'json') => {
+  if (resource.type) return normalizeResourceType(resource.type);
+  const text = normalizeText([
+    resource.id,
+    resource.title,
+    resource.category,
+    resource.description,
+  ].filter(Boolean).join(' '));
+  for (const type of Object.keys(RESOURCE_TYPE_HINTS)) {
+    const normalizedType = normalizeText(type);
+    if (text.includes(normalizedType)) {
+      return type;
     }
   }
-
-  return unique(fileNames);
+  if (/\batm\b.*\b(withdrawal|receipt)\b|\bcash withdrawal receipt\b/.test(text)) return 'atm_receipt';
+  if (/\bsalary\b.*\b(domiciliation|certificate)\b/.test(text)) return 'salary_certificate';
+  if (/\bstanding order\b/.test(text)) return 'standing_order';
+  if (/\b(sonede|steg|telecom|utility|water|electricity)\b.*\bbill\b/.test(text)) return 'bill_payment';
+  if (/\bqr\b.*\b(payment|receipt|merchant)\b/.test(text)) return 'payment_receipt';
+  if (/\b(student pack|sme).*product sheet\b|\bproduct sheet\b/.test(text)) return 'product_sheet';
+  for (const [type, hints] of Object.entries(RESOURCE_TYPE_HINTS)) {
+    const matches = hints
+      .map((hint) => normalizeText(hint))
+      .filter((hint) => hint && text.includes(hint));
+    const strongMatches = matches.filter((hint) => hint.includes(' '));
+    if (matches.length >= 2 || strongMatches.length >= 1) return type;
+  }
+  if (resource.category) return normalizeResourceType(resource.category);
+  return resourceFileType === 'image' ? 'image_resource' : `${resourceFileType}_resource`;
 };
 
-const entriesFromCatalogJson = (catalogJson) => {
-  const items = Array.isArray(catalogJson)
-    ? catalogJson
-    : catalogJson?.resources || catalogJson?.items || catalogJson?.documents || [];
+const semanticCatalogMetadata = (resource = {}, catalogPolicies = {}) => ({
+  catalogVersion: catalogPolicies.catalogVersion,
+  generatedAt: catalogPolicies.generatedAt,
+  catalogName: catalogPolicies.name,
+  catalogDescription: catalogPolicies.description,
+  environment: catalogPolicies.environment,
+  resourceBaseUrlEnv: catalogPolicies.resourceBaseUrlEnv,
+  supportedLanguages: catalogPolicies.supportedLanguages,
+  selectionPolicy: catalogPolicies.selectionPolicy,
+  routingPolicy: catalogPolicies.routingPolicy,
+  resourceId: resource.id,
+  id: resource.id,
+  title: resource.title,
+  category: resource.category,
+  type: resource.type,
+  description: resource.description,
+  exampleQueries: Array.isArray(resource.exampleQueries) ? resource.exampleQueries : [],
+  intents: Array.isArray(resource.intents) ? resource.intents : [],
+  relatedActions: normalizeResourceRelatedActions(resource),
+  keyFields: resource.keyFields && typeof resource.keyFields === 'object'
+    ? resource.keyFields
+    : {},
+});
 
-  return items
-    .map((item) => {
-      if (typeof item === 'string') {
-        const fileName = getUrlFileName(item);
-        const jsonUrl = fileName?.endsWith('.json')
-          ? toCatalogJsonUrl(item)
-          : deriveJsonUrlFromFileUrl(item);
-        return {
-          fileName: jsonUrl ? getUrlFileName(jsonUrl) : fileName,
-          url: jsonUrl,
-          metadata: null,
-        };
-      }
+const normalizeGlobalCatalogResources = (catalogJson = {}) => {
+  if (!Array.isArray(catalogJson?.resources)) return [];
+  const catalogPolicies = normalizeCatalogPolicies(catalogJson);
 
-      const explicitJsonUrl = item.jsonUrl || item.resourceUrl || (
-        String(item.url || '').endsWith('.json') ? item.url : null
-      );
-      const fileUrl = item.fileUrl || item.documentUrl || (
-        String(item.url || '').match(/\.[a-z0-9]+$/i) && !String(item.url || '').endsWith('.json')
-          ? item.url
-          : null
-      );
-      const rawFileName =
-        item.fileName ||
-        item.name ||
-        getUrlFileName(explicitJsonUrl) ||
-        getUrlFileName(fileUrl);
-      const jsonUrl = explicitJsonUrl
-        ? toCatalogJsonUrl(explicitJsonUrl)
-        : deriveJsonUrlFromFileUrl(fileUrl || rawFileName);
-      const fileName = jsonUrl ? getUrlFileName(jsonUrl) : rawFileName;
+  return catalogJson.resources.map((resource) => {
+    // Minimal description-only schema: id, title, description, files are the only
+    // required fields. Everything else (category, type, exampleQueries, intents,
+    // keyFields, relatedActions) is optional and absent in the v4.x catalog.
+    const hasRequiredFields =
+      resource &&
+      typeof resource.id === 'string' && resource.id.trim() &&
+      typeof resource.title === 'string' && resource.title.trim() &&
+      typeof resource.description === 'string' && resource.description.trim() &&
+      Array.isArray(resource.files) && resource.files.length > 0;
+    if (!hasRequiredFields) {
+      debugResourceSearchLog('[resource-catalog] skipped invalid resource entry:', {
+        id: resource?.id || null,
+        reason: 'missing required field (id/title/description/files)',
+      });
+      return null;
+    }
 
-      return {
-        fileName,
-        url: jsonUrl,
-        metadata: item,
-      };
-    })
-    .filter(
-      (item) =>
-        item.fileName &&
-        (item.metadata || item.url) &&
-        (!item.url || isAllowedJsonResourceUrl(item.url)),
-    );
+    const files = Array.isArray(resource.files)
+      ? resource.files.map(withCatalogFileUrl).filter(Boolean)
+      : [];
+    const primaryFile = selectPrimaryCatalogFile(files);
+    if (!primaryFile) return null;
+
+    const resourceFileType = inferCatalogResourceFileType(files);
+    const resourceType = inferCatalogResourceType(resource, resourceFileType);
+    const metadata = semanticCatalogMetadata(resource, catalogPolicies);
+
+    return {
+      fileName: primaryFile.fileName,
+      url: null,
+      metadata: {
+        ...metadata,
+        files,
+        resourceFileType,
+        fileUrl: primaryFile.fileUrl,
+        mimeType: primaryFile.mimeType,
+        resourceType,
+      },
+    };
+  }).filter(Boolean);
 };
 
-const loadDirectoryCatalog = async () => {
-  const html = await fetchText(JSON_RESOURCE_BASE_URL);
-  const fileNames = parseDirectoryListing(html);
+// In-memory cache of the parsed + normalized catalog, keyed on the file's mtime so an edit to
+// catalog.json is picked up automatically (the file is re-read only when it actually changes).
+let catalogCache = null; // { mtimeMs, catalog }
 
-  if (!fileNames.length) {
-    return [];
+const loadConfiguredGlobalCatalog = async () => {
+  const catalogPath = path.resolve(env.resourceCatalogPath);
+
+  let mtimeMs = null;
+  try {
+    mtimeMs = (await fs.stat(catalogPath)).mtimeMs;
+  } catch {
+    mtimeMs = null;
+  }
+  if (catalogCache && mtimeMs !== null && catalogCache.mtimeMs === mtimeMs) {
+    debugResourceSearchLog('[resource-catalog] served catalog from in-memory cache');
+    return catalogCache.catalog;
   }
 
-  return Promise.all(
-    fileNames.map(async (fileName) => {
-      const url = `${JSON_RESOURCE_BASE_URL}${fileName}`;
-      const metadata = await fetchJson(url).catch(() => null);
-      return { fileName, url, metadata };
-    }),
-  );
-};
+  let catalogJson;
+  try {
+    const raw = await fs.readFile(catalogPath, 'utf8');
+    catalogJson = JSON.parse(raw);
+  } catch (error) {
+    throw new ResourceCatalogUnavailableError(
+      `Unable to read Laragon resource catalog at ${catalogPath}: ${error.message}`,
+    );
+  }
 
-const loadFallbackCatalog = async () => {
-  const catalogJson = await fetchJson(CATALOG_URL);
-  const entries = entriesFromCatalogJson(catalogJson);
-
-  return Promise.all(
-    entries.map(async (entry) => {
-      const resourceJson = entry.url
-        ? await fetchJson(entry.url).catch(() => null)
-        : null;
-
-      return {
-        ...entry,
-        metadata: {
-          ...(entry.metadata || {}),
-          ...(resourceJson || {}),
-        },
-      };
-    }),
-  );
-};
-
-const catalogEntryKey = (entry = {}) =>
-  entry.metadata?.resourceId ||
-  entry.fileName ||
-  entry.url ||
-  entry.metadata?.fileUrl ||
-  entry.metadata?.title;
-
-const mergeCatalogEntries = (...catalogs) => {
-  const merged = new Map();
-
-  catalogs.flat().forEach((entry) => {
-    const key = catalogEntryKey(entry);
-    if (!key) return;
-
-    const existing = merged.get(key);
-    merged.set(key, {
-      ...(existing || {}),
-      ...entry,
-      metadata: {
-        ...(existing?.metadata || {}),
-        ...(entry.metadata || {}),
-      },
+  if (!Array.isArray(catalogJson?.resources)) {
+    throw new ResourceCatalogUnavailableError(
+      `Invalid Laragon resource catalog at ${catalogPath}: expected a resources array.`,
+    );
+  }
+  const catalog = normalizeGlobalCatalogResources(catalogJson);
+  catalogCache = { mtimeMs, catalog };
+  if (!catalogStartupLogged) {
+    console.log('[resource-catalog] startup:', {
+      catalogPath,
+      catalogVersion: catalogJson.catalogVersion || null,
+      resourceCount: catalog.length,
+      resourceBaseUrl: RESOURCE_SERVER_BASE_URL,
     });
-  });
-
-  return Array.from(merged.values());
+    catalogStartupLogged = true;
+  }
+  return catalog;
 };
 
 const isResourceMetadata = (metadata) =>
@@ -583,55 +765,38 @@ const isResourceMetadata = (metadata) =>
       ),
   );
 
-const loadResourceCatalog = async ({ forceRefresh = false, catalog: catalogOverride = null } = {}) => {
+const loadResourceCatalog = async ({ catalog: catalogOverride = null } = {}) => {
   if (Array.isArray(catalogOverride)) {
-    return catalogOverride.filter((entry) => isResourceMetadata(entry.metadata));
+    const entries = catalogOverride.some((entry) => entry?.metadata)
+      ? catalogOverride
+      : normalizeGlobalCatalogResources({ resources: catalogOverride });
+    return entries.filter((entry) => isResourceMetadata(entry.metadata));
   }
 
-  const now = Date.now();
-
-  if (!forceRefresh && catalogCache && catalogCacheExpiresAt > now) {
-    return catalogCache;
+  if (catalogOverride && typeof catalogOverride === 'object' && Array.isArray(catalogOverride.resources)) {
+    return normalizeGlobalCatalogResources(catalogOverride)
+      .filter((entry) => isResourceMetadata(entry.metadata));
   }
 
-  console.log('[resource-catalog] active base URL:', RESOURCE_SERVER_BASE_URL);
-  console.log('[resource-catalog] catalog URL:', CATALOG_URL);
+  debugResourceSearchLog('[resource-catalog] loading configured Laragon catalog');
 
-  let catalog = [];
-  let lastError = null;
-
+  let catalog;
   try {
-    catalog = await loadDirectoryCatalog();
+    catalog = await loadConfiguredGlobalCatalog();
   } catch (error) {
-    lastError = error;
-    catalog = [];
+    if (error instanceof ResourceCatalogUnavailableError) throw error;
+    throw new ResourceCatalogUnavailableError(error.message);
   }
 
   if (!catalog.length) {
-    try {
-      catalog = await loadFallbackCatalog();
-    } catch (error) {
-      lastError = error;
-      catalog = [];
-    }
-  } else {
-    try {
-      const fallbackCatalog = await loadFallbackCatalog();
-      catalog = mergeCatalogEntries(fallbackCatalog, catalog);
-    } catch (error) {
-      lastError = lastError || error;
-    }
+    throw new ResourceCatalogUnavailableError(
+      `Laragon resource catalog at ${env.resourceCatalogPath} contains no usable resources.`,
+    );
   }
 
-  if (!catalog.length && lastError) {
-    console.log('[resource-catalog] no resources loaded:', lastError.message);
-    throw new ResourceCatalogUnavailableError();
-  }
-
-  catalogCache = catalog.filter((entry) => isResourceMetadata(entry.metadata));
-  catalogCacheExpiresAt = now + 60 * 1000;
-  console.log('[resource-catalog] resources loaded count:', catalogCache.length);
-  return catalogCache;
+  const resourceCatalog = catalog.filter((entry) => isResourceMetadata(entry.metadata));
+  debugResourceSearchLog('[resource-catalog] resources loaded count:', resourceCatalog.length);
+  return resourceCatalog;
 };
 
 const flattenSearchParts = (value, parts = []) => {
@@ -656,12 +821,14 @@ const flattenSearchParts = (value, parts = []) => {
   return parts;
 };
 
-const metadataText = (entry) =>
+const semanticMetadataText = (metadata = {}) =>
   normalizeText([
-    entry.fileName,
-    entry.url,
-    ...flattenSearchParts(entry.metadata),
+    fieldText(metadata, APPROVED_RESOURCE_MATCH_FIELDS),
+    ...flattenSearchParts(metadata.exampleQueries || []),
+    ...flattenSearchParts(metadata.intents || []),
   ].join(' '));
+
+const metadataText = (entry) => semanticMetadataText(entry.metadata || {});
 
 const detectRequestedResourceTypes = (messageText) => {
   const text = normalizeText(messageText);
@@ -716,7 +883,15 @@ const detectRequestedResourceTypes = (messageText) => {
   ) {
     requested.push('product_sheet');
   }
-  if (text.includes('card') && text.includes('limit')) {
+  if (
+    (text.includes('card') && text.includes('limit')) ||
+    text.includes('available card limit') ||
+    text.includes('card payment due') ||
+    text.includes('card payment due date') ||
+    text.includes('card notice') ||
+    (text.includes('card') && text.includes('minimum payment')) ||
+    (text.includes('card') && text.includes('payment due'))
+  ) {
     requested.push('card_limit_notice');
   }
   if (text.includes('standing order') || (text.includes('order') && text.includes('rent'))) {
@@ -786,7 +961,7 @@ const detectRequestedResourceTypes = (messageText) => {
     requested.push('international_transfer_request', 'transfer_order');
   }
   if (
-    text.includes('bill') ||
+    /\bbill\b/.test(text) ||
     text.includes('invoice') ||
     (text.includes('pay') && hasBillProvider) ||
     hasBillProvider
@@ -849,12 +1024,14 @@ const scoreEntry = (entry, messageText) => {
   const resourceType = normalizeResourceType(entry.metadata?.resourceType);
   const requestedTypes = detectRequestedResourceTypes(messageText);
   const specificRules = matchedSpecificResourceRules(messageText);
-  const aliasMatch = scoreAliasForTitle(messageText, entry.metadata?.title || entry.fileName || '');
+  const aliasMatch = scoreAliasForTitle(messageText, entry.metadata?.title || '');
   let score = 0;
 
   if (aliasMatch.score > 0) {
     score += aliasMatch.score;
   }
+
+  score += businessIdentifierOverlapScore(messageText, entry.metadata || {});
 
   for (const token of queryTokens) {
     const tokenWeight = GENERIC_QUERY_TERMS.has(token) ? 0.5 : 2;
@@ -899,6 +1076,18 @@ const scoreEntry = (entry, messageText) => {
   }
 
   const normalizedMessage = normalizeText(messageText);
+
+  // Strong title-phrase boost for image resources: thin metadata shouldn't compete on tokens alone.
+  const isImageEntry = /\bimage\b/.test(normalizeText(
+    entry.metadata?.mimeType || entry.metadata?.contentType || ''
+  )) || resourceType === 'image_test_resource';
+  if (isImageEntry) {
+    const entryTitle = normalizeText(entry.metadata?.title || '');
+    if (entryTitle && normalizedMessage.includes(entryTitle)) {
+      score += 50;
+    }
+  }
+
   const appointmentLookupRequested = isAppointmentLookupRequest(normalizedMessage);
   const fxRequested =
     normalizedMessage.includes('foreign currency') ||
@@ -1092,7 +1281,7 @@ const scoreCatalogEntries = (catalog, messageText, options = {}) => {
     ? new Set(options.excludedResourceTypes.map(normalizeResourceType))
     : new Set();
 
-  return catalog
+  const scored = catalog
     .filter((entry) => {
       const resourceType = normalizeResourceType(entry.metadata?.resourceType);
       if (allowedResourceTypes && !allowedResourceTypes.has(resourceType)) return false;
@@ -1104,6 +1293,21 @@ const scoreCatalogEntries = (catalog, messageText, options = {}) => {
       score: scoreEntry(entry, messageText),
     }))
     .sort((a, b) => b.score - a.score);
+
+  if (env.debugResourceSearch) {
+    scored.slice(0, 6).forEach((entry) => {
+      const resourceType = normalizeResourceType(entry.metadata?.resourceType);
+      const matchedTokens = matchedTokensForEntry(entry, messageText);
+      console.log('[resource-catalog] candidate:', {
+        title: entry.metadata?.title || entry.fileName,
+        type: resourceType,
+        score: entry.score,
+        matchedTerms: matchedTokens,
+      });
+    });
+  }
+
+  return scored;
 };
 
 const fieldText = (metadata = {}, keys = []) =>
@@ -1128,11 +1332,11 @@ const tokenOverlapScore = (queryTokens = [], targetText = '', weight = 1) => {
   }, 0);
 };
 
-const idOverlapScore = (queryText = '', metadata = {}) => {
+const businessIdentifierOverlapScore = (queryText = '', metadata = {}) => {
   const idText = normalizeText(fieldText(metadata, [
-    'id',
-    'resourceId',
     'accountId',
+    'sourceAccountId',
+    'debitAccountId',
     'customerId',
     'requestId',
     'billId',
@@ -1149,69 +1353,213 @@ const idOverlapScore = (queryText = '', metadata = {}) => {
 
 const semanticResourceText = (entry = {}) => {
   const metadata = entry.metadata || {};
+  const exampleQueryText = fieldText(metadata, ['exampleQueries']);
+  const intentText = fieldText(metadata, ['intents']);
   return {
-    title: normalizeText(fieldText(metadata, ['title', 'name', 'label']) || entry.fileName),
+    title: normalizeText(fieldText(metadata, ['title', 'name', 'label'])),
     category: normalizeText(fieldText(metadata, [
       'category',
-      'type',
-      'resourceType',
-      'documentType',
-      'service',
     ])),
     description: normalizeText(fieldText(metadata, [
       'description',
-      'summary',
-      'shortDescription',
-      'details',
-      'purpose',
     ])),
-    tags: normalizeText(fieldText(metadata, [
-      'tags',
-      'aliases',
-      'keywords',
-      'searchTerms',
-      'matchedAliases',
-    ])),
-    preview: normalizeText(fieldText(metadata, [
-      'fileTextPreview',
-      'textPreview',
-      'extractedTextPreview',
-      'pdfTextPreview',
-      'contentPreview',
-      'extractedText',
-    ])),
-    fileUrl: normalizeText(fieldText(metadata, ['fileUrl', 'documentUrl', 'url']) || entry.url),
-    metadata: metadataText(entry),
+    examples: normalizeText(exampleQueryText),
+    intents: normalizeText(intentText),
   };
 };
 
-const scoreSemanticEntry = (entry, messageText) => {
-  const queryText = normalizeText(messageText);
-  const queryTokens = tokenize(queryText);
-  const parts = semanticResourceText(entry);
+const resourceFileKind = (entry = {}) => {
+  const metadata = entry.metadata || {};
+  const explicitType = normalizeText(metadata.resourceFileType || '');
+  if (explicitType === 'image' || explicitType === 'txt' || explicitType === 'json' || explicitType === 'pdf') {
+    return explicitType;
+  }
 
+  const fileText = normalizeText([
+    metadata.fileUrl,
+    metadata.documentUrl,
+    metadata.url,
+    entry.fileName,
+  ].filter(Boolean).join(' '));
+  const mimeText = normalizeText(metadata.mimeType || metadata.contentType || '');
+
+  if (/\bimage\b/.test(mimeText) || /\b(png|jpg|jpeg|webp|tif|tiff)\b/.test(fileText)) return 'image';
+  if (/\btext\b/.test(mimeText) || /\btxt\b/.test(fileText)) return 'txt';
+  if (/\bjson\b/.test(mimeText) || /\bjson\b/.test(fileText)) return 'json';
+  if (/\bpdf\b/.test(mimeText) || /\bpdf\b/.test(fileText)) return 'pdf';
+  return 'unknown';
+};
+
+const queryRequestsVisualResource = (queryText = '', originalText = queryText) => {
+  const text = normalizeText(`${queryText} ${originalText}`);
+  return /\b(qr|image|img|photo|picture|screenshot|scan|scanned|visual|png|jpg|jpeg|webp)\b/.test(text);
+};
+
+const queryRequestsReadableResource = (queryText = '', originalText = queryText) => {
+  const text = normalizeText(`${queryText} ${originalText}`);
+  return /\b(read|text|txt|pdf|document|file|open|show|view|download)\b/.test(text);
+};
+
+const specificQueryTokens = (queryTokens = []) =>
+  queryTokens.filter((token) => !GENERIC_RESOURCE_QUERY_TERMS.has(token));
+
+const DISTINCTIVE_QUERY_NOISE_TERMS = new Set([
+  ...GENERIC_RESOURCE_QUERY_TERMS,
+  'details',
+  'happened',
+  'notice',
+  'resource',
+]);
+
+const distinctiveQueryTokens = (queryTokens = []) =>
+  queryTokens.filter((token) => token.length >= 3 && !DISTINCTIVE_QUERY_NOISE_TERMS.has(token));
+
+// The catalog selectionPolicy can restrict semantic scoring to a subset of
+// fields. The description-only catalog (v4.x) sets matchFields = ["description"]:
+// id/title/files are metadata only and must NOT contribute to scoring.
+const isDescriptionOnlyPolicy = (selectionPolicy = {}) => {
+  const fields = Array.isArray(selectionPolicy?.matchFields)
+    ? selectionPolicy.matchFields.map((field) => String(field).trim().toLowerCase()).filter(Boolean)
+    : [];
+  return fields.length === 1 && fields[0] === 'description';
+};
+
+// Pure description scorer. Scores only resource.description — no title, id,
+// category, type, fileName, intents, exampleQueries, or resourceType signals.
+// File names are used only after a resource has been selected.
+const scoreDescriptionOnlyEntry = (entry, messageText) => {
+  const queryText = normalizeResourceSearchQuery(messageText) || normalizeText(messageText);
+  const semanticQueryText = normalizeText([...expandQueryParts(queryText), queryText].join(' '));
+  const queryTokens = tokenize(semanticQueryText);
   if (!queryText || !queryTokens.length) return 0;
 
-  let score = 0;
-  score += tokenOverlapScore(queryTokens, parts.title, 8);
-  score += exactPhraseBonus(queryText, parts.title, 12);
-  score += tokenOverlapScore(queryTokens, parts.category, 5);
-  score += exactPhraseBonus(queryText, parts.category, 6);
-  score += tokenOverlapScore(queryTokens, parts.description, 4);
-  score += exactPhraseBonus(queryText, parts.description, 7);
-  score += tokenOverlapScore(queryTokens, parts.tags, 5);
-  score += exactPhraseBonus(queryText, parts.tags, 8);
-  score += tokenOverlapScore(queryTokens, parts.preview, 3);
-  score += exactPhraseBonus(queryText, parts.preview, 5);
-  score += tokenOverlapScore(queryTokens, parts.fileUrl, 2);
-  score += tokenOverlapScore(queryTokens, parts.metadata, 1.5);
-  score += idOverlapScore(queryText, entry.metadata || {});
+  const description = normalizeText(fieldText(entry.metadata || {}, ['description']));
+  if (!description) return 0;
 
-  const matchedTokenCount = queryTokens.filter((token) => parts.metadata.includes(token)).length;
+  let score = 0;
+  score += tokenOverlapScore(queryTokens, description, 16);
+  score += exactPhraseBonus(queryText, description, 28);
+
+  const distinctiveTokens = distinctiveQueryTokens(queryTokens);
+  for (const token of distinctiveTokens) {
+    score += wholeWordIncludes(description, token) ? 12 : -6;
+  }
+
+  const matchedTokenCount = queryTokens.filter((token) => description.includes(token)).length;
   const coverage = matchedTokenCount / Math.max(queryTokens.length, 1);
   if (coverage >= 0.8) score += 8;
   else if (coverage >= 0.5) score += 4;
   else if (coverage < 0.25) score -= 4;
+
+  return Number(score.toFixed(2));
+};
+
+const scoreSemanticEntry = (entry, messageText) => {
+  if (isDescriptionOnlyPolicy(entry.metadata?.selectionPolicy)) {
+    return scoreDescriptionOnlyEntry(entry, messageText);
+  }
+
+  const queryText = normalizeResourceSearchQuery(messageText) || normalizeText(messageText);
+  const semanticQueryText = normalizeText([...expandQueryParts(queryText), queryText].join(' '));
+  const queryTokens = tokenize(semanticQueryText);
+  const parts = semanticResourceText(entry);
+  const resourceType = normalizeResourceType(entry.metadata?.resourceType);
+  const originalText = normalizeText(messageText);
+
+  if (!queryText || !queryTokens.length) return 0;
+
+  let score = 0;
+  score += tokenOverlapScore(queryTokens, parts.description, 16);
+  score += exactPhraseBonus(queryText, parts.description, 28);
+  score += tokenOverlapScore(queryTokens, parts.examples, 11);
+  score += exactPhraseBonus(queryText, parts.examples, 20);
+  score += tokenOverlapScore(queryTokens, parts.title, 7);
+  score += exactPhraseBonus(queryText, parts.title, 12);
+  score += tokenOverlapScore(queryTokens, parts.category, 3);
+  score += exactPhraseBonus(queryText, parts.category, 4);
+  score += tokenOverlapScore(queryTokens, parts.intents, 3);
+  score += exactPhraseBonus(queryText, parts.intents, 4);
+  score += businessIdentifierOverlapScore(queryText, entry.metadata || {});
+
+  const semanticText = normalizeText([
+    parts.title,
+    parts.description,
+    parts.category,
+    parts.examples,
+    parts.intents,
+  ].join(' '));
+  const distinctiveTokens = distinctiveQueryTokens(queryTokens);
+  for (const token of distinctiveTokens) {
+    score += semanticText.includes(token) ? 8 : -8;
+  }
+
+  // Description-first anchor. The catalog selectionPolicy lists `title` as the
+  // primary match field: a resource whose title names the query's distinctive
+  // object (e.g. "checkbook" -> "Checkbook Request Status") is the intended
+  // match. Without this, generic fulfillment words that only overlap in prose
+  // ("pick up", "ready", "appointment") let unrelated resources outscore the
+  // object-specific one. Whole-word match on the title keeps the boost precise.
+  const titleText = normalizeText(parts.title);
+  for (const token of distinctiveTokens) {
+    if (wholeWordIncludes(titleText, token)) score += 22;
+  }
+
+  if (/\bsms\s+card\s+alert\b/.test(originalText)) {
+    score += /\bsms\b/.test(semanticText) && /\bcard\b/.test(semanticText) && /\balert\b/.test(semanticText)
+      ? 42
+      : -24;
+  }
+
+  for (const provider of BILL_PROVIDER_KEYWORDS) {
+    if (!queryText.includes(provider)) continue;
+    if (semanticText.includes(provider)) score += 14;
+    else if (isBillResourceType(resourceType) || resourceType.includes('payment')) score -= 8;
+  }
+
+  const matchedTokenCount = queryTokens.filter((token) => semanticText.includes(token)).length;
+  const coverage = matchedTokenCount / Math.max(queryTokens.length, 1);
+  if (coverage >= 0.8) score += 8;
+  else if (coverage >= 0.5) score += 4;
+  else if (coverage < 0.25) score -= 4;
+
+  // Extra boost when image resource title appears verbatim in the original query.
+  if (resourceFileKind(entry) === 'image' && parts.title && originalText.includes(parts.title)) {
+    score += 50;
+  }
+
+  const specificTokens = specificQueryTokens(queryTokens);
+  // Skip specificTokens penalty for image resources when their title phrase matches the query —
+  // image metadata is intentionally thin so token absence is not a mismatch signal.
+  const isImageTitleMatch =
+    resourceFileKind(entry) === 'image' &&
+    parts.title &&
+    (originalText.includes(parts.title) || queryText.includes(parts.title));
+  if (
+    !isImageTitleMatch &&
+    specificTokens.length &&
+    !specificTokens.some((token) => semanticText.includes(token))
+  ) {
+    score -= Math.max(20, specificTokens.length * 12);
+  }
+
+  if (
+    resourceFileKind(entry) === 'image' &&
+    !queryRequestsVisualResource(queryText, originalText) &&
+    queryRequestsReadableResource(queryText, originalText) &&
+    !/\b(payment|receipt|invoice|merchant|qr|notice|alert)\b/.test(queryText)
+  ) {
+    score -= 18;
+  }
+
+  const asksAccountBalance =
+    /\baccounts?\b.*\bbalance\b/.test(queryText) ||
+    /\bbalance\b.*\baccounts?\b/.test(queryText);
+  if (
+    asksAccountBalance &&
+    !['account_statement', 'account_summary', 'account_profile'].includes(resourceType)
+  ) {
+    score -= 30;
+  }
 
   return Number(score.toFixed(2));
 };
@@ -1238,6 +1586,24 @@ const scoreSemanticCatalogEntries = (catalog, messageText, options = {}) => {
     .sort((a, b) => b.score - a.score);
 };
 
+const isLiveAccountBalanceQuery = (messageText = '') => {
+  const text = normalizeText(messageText);
+  if (!text) return false;
+  const asksBalance =
+    /\bwhat\s+(?:is|are)\s+(?:my\s+)?accounts?\s+balance\b/.test(text) ||
+    /\b(show|check|get|view)\b.{0,40}\b(?:my\s+)?(?:account\s+)?balance\b/.test(text) ||
+    /\b(?:my\s+)?account\s+balance\b/.test(text);
+  if (!asksBalance) return false;
+  return !/\b(statement|document|pdf|certificate|receipt|notice|summary|closing|opening|transaction|movement)\b/.test(text);
+};
+
+// IMPORTANT (policy vs. real thresholds): the catalog selectionPolicy fields `minConfidence` (0.75),
+// `maxCandidates`, and `fileNameUse` are DESCRIPTIVE METADATA ONLY — no code reads them. The real
+// retrieval gates are RAW SCORE/MARGIN values in points (not a 0–1 confidence):
+//   minScore  = env.semanticResourceMinScore  (SEMANTIC_RESOURCE_MIN_SCORE, default 12)
+//   minMargin = env.semanticResourceMinMargin  (SEMANTIC_RESOURCE_MIN_MARGIN, default 3)
+// `fileNameUse: only_after_selection` is honored in spirit because scoreDescriptionOnlyEntry scores
+// ONLY the description; file names are used only after a resource is selected.
 const applySemanticSelectionRules = (scoredEntries = [], options = {}) => {
   const minScore = Number.isFinite(options.minScore)
     ? options.minScore
@@ -1262,6 +1628,9 @@ const applySemanticSelectionRules = (scoredEntries = [], options = {}) => {
   if (second && margin < minMargin && best.score < minScore + minMargin * 2) {
     return {
       matches: [],
+      ambiguousMatches: scoredEntries
+        .filter((entry) => entry.score >= minScore && best.score - entry.score <= minMargin)
+        .slice(0, 5),
       reason: 'weak_margin',
       bestScore: best.score,
       secondScore: second.score,
@@ -1286,13 +1655,28 @@ const findMatchingResources = async (messageText, options = {}) => {
   }
 
   const catalog = await loadResourceCatalog(options);
-  const useSemanticSearch = options.searchMode === 'semantic' || options.semanticSearch === true;
+  const searchText = normalizeResourceSearchQuery(messageText) || messageText;
+  // Description-only safety default: if the loaded catalog declares matchFields = ["description"],
+  // force semantic (description-only) scoring even when a caller forgot to pass searchMode:'semantic'.
+  // This makes the legacy keyword scorer (scoreEntry, which reads title/type/intents) unreachable for
+  // a description-only catalog, so resource selection can never silently fall back to those fields.
+  const catalogIsDescriptionOnly = catalog.some((entry) =>
+    isDescriptionOnlyPolicy(entry.metadata?.selectionPolicy));
+  if (catalogIsDescriptionOnly && !(options.searchMode === 'semantic' || options.semanticSearch === true)) {
+    debugResourceSearchLog('[resource-catalog] description-only catalog: forcing semantic description scoring');
+  }
+  const useSemanticSearch =
+    options.searchMode === 'semantic' || options.semanticSearch === true || catalogIsDescriptionOnly;
   const minScore = Number.isFinite(options.minScore)
     ? options.minScore
     : useSemanticSearch
       ? env.semanticResourceMinScore
       : MIN_MATCH_SCORE;
   const limit = Number.isFinite(options.limit) ? options.limit : 5;
+  if (isLiveAccountBalanceQuery(messageText)) {
+    debugResourceSearchLog('[resource-catalog] no match: live account balance query');
+    return [];
+  }
   if (isUnsupportedImageResourceQuery(messageText)) {
     const reason = 'image_resources_disabled';
     if (useSemanticSearch) {
@@ -1317,7 +1701,7 @@ const findMatchingResources = async (messageText, options = {}) => {
         topCandidates: [],
       });
     }
-    console.log('[resource-catalog] no match: image resources are disabled');
+    debugResourceSearchLog('[resource-catalog] no match: image resources are disabled');
     return [];
   }
   if (useSemanticSearch) {
@@ -1332,17 +1716,14 @@ const findMatchingResources = async (messageText, options = {}) => {
       },
       indexPath: CATALOG_URL,
       searchFields: [
-        'title/name',
-        'category/type',
-        'description/summary',
-        'metadata',
-        'extractedTextPreview',
-        'tags/aliases',
-        'fileUrl',
-        'account/customer/resource IDs',
+        'description',
+        'exampleQueries',
+        'title',
+        'category',
+        'intents',
       ],
     });
-    const scoredEntries = scoreSemanticCatalogEntries(catalog, messageText, options);
+    const scoredEntries = scoreSemanticCatalogEntries(catalog, searchText, options);
     const selection = applySemanticSelectionRules(scoredEntries, {
       minScore,
       minMargin: options.minMargin,
@@ -1380,18 +1761,28 @@ const findMatchingResources = async (messageText, options = {}) => {
         minMargin: selection.minMargin,
         topCandidates,
       });
-      console.log('[resource-catalog] semantic no confident match:', {
+      debugResourceSearchLog('[resource-catalog] semantic no confident match:', {
         queryLength: messageText.length,
         reason: selection.reason,
         bestScore: selection.bestScore,
         minScore: selection.minScore,
         minMargin: selection.minMargin,
       });
+      if (selection.reason === 'weak_margin' && selection.ambiguousMatches?.length) {
+        return selection.ambiguousMatches.map((entry) => ({
+          fileName: entry.fileName,
+          url: entry.url,
+          metadata: entry.metadata,
+          score: entry.score,
+          ambiguous: true,
+          selectionReason: selection.reason,
+        }));
+      }
       return [];
     }
 
     const best = selection.matches[0];
-    console.log('[resource-catalog] semantic selected resource:', {
+    debugResourceSearchLog('[resource-catalog] semantic selected resource:', {
       resourceId: safeResourceId(best),
       resourceType: best.metadata?.resourceType,
       score: best.score,
@@ -1411,8 +1802,8 @@ const findMatchingResources = async (messageText, options = {}) => {
       score: entry.score,
     }));
   }
-  const scoredEntries = scoreCatalogEntries(catalog, messageText, options);
-  const queryTokens = expandQueryParts(messageText);
+  const scoredEntries = scoreCatalogEntries(catalog, searchText, options);
+  const queryTokens = expandQueryParts(searchText);
   const genericOnlyQuery =
     queryTokens.length > 0 && queryTokens.every((token) => GENERIC_QUERY_TERMS.has(token));
   const topResourceTypes = unique(
@@ -1429,7 +1820,7 @@ const findMatchingResources = async (messageText, options = {}) => {
     ? []
     : scoredEntries.filter((entry) => entry.score >= minScore);
   if (!scored.length) {
-    const aliasMatches = findAliasMatchesInCatalog(messageText, catalog)
+    const aliasMatches = findAliasMatchesInCatalog(searchText, catalog)
       .slice(0, limit)
       .map((entry) => ({
         ...entry,
@@ -1439,16 +1830,39 @@ const findMatchingResources = async (messageText, options = {}) => {
       scored = aliasMatches;
     }
   }
+  if (!scored.length) {
+    const semanticEntries = scoreSemanticCatalogEntries(catalog, searchText, options);
+    const semanticSelection = applySemanticSelectionRules(semanticEntries, {
+      minScore: env.semanticResourceMinScore,
+      minMargin: options.minMargin,
+    });
+    if (semanticSelection.matches.length) {
+      scored = semanticSelection.matches;
+      logAgentStep(options.requestId, 'semantic_resource_fallback_selected', {
+        searchQueryLength: messageText.length,
+        normalizedQueryLength: searchText.length,
+        bestScore: semanticSelection.bestScore,
+        secondScore: semanticSelection.secondScore || null,
+        minScore: semanticSelection.minScore,
+        minMargin: semanticSelection.minMargin,
+        topCandidates: semanticEntries.slice(0, 3).map((entry) => ({
+          resourceId: safeResourceId(entry),
+          type: entry.metadata?.resourceType || entry.metadata?.type || entry.metadata?.category,
+          score: entry.score,
+        })),
+      });
+    }
+  }
   const topCandidates = scoredEntries.slice(0, 3).map((entry) => ({
     resourceId: safeResourceId(entry),
     resourceType: entry.metadata?.resourceType,
     score: entry.score,
   }));
 
-  console.log('[resource-catalog] resource query:', {
+  debugResourceSearchLog('[resource-catalog] resource query:', {
     queryLength: messageText.length,
   });
-  console.log('[resource-catalog] top candidates:', topCandidates);
+  debugResourceSearchLog('[resource-catalog] top candidates:', topCandidates);
   logArchitecture('laragon_resource_search', {
     requestId: options.requestId,
     threadId: options.threadId,
@@ -1462,14 +1876,14 @@ const findMatchingResources = async (messageText, options = {}) => {
 
   if (!scored.length) {
     const bestScore = scoredEntries[0]?.score ?? 0;
-    console.log('[resource-catalog] no confident match:', {
+    debugResourceSearchLog('[resource-catalog] no confident match:', {
       minScore,
       bestScore,
       reason: ambiguousGenericMatch ? 'ambiguous_generic_query' : 'below_minimum_threshold',
     });
   } else {
     const best = scored[0];
-    console.log('[resource-catalog] selected resource:', {
+    debugResourceSearchLog('[resource-catalog] selected resource:', {
       resourceId: safeResourceId(best),
       resourceType: best.metadata?.resourceType,
       score: best.score,
@@ -1532,17 +1946,55 @@ const findMatchingResource = async (messageText, options = {}) => {
   const best = matches[0];
 
   if (!best) {
-    console.log('[resource-catalog] no match found');
+    debugResourceSearchLog('[resource-catalog] no match found');
     return null;
   }
 
-  console.log(
+  debugResourceSearchLog(
     '[resource-catalog] matched resource title/resourceType:',
     best.metadata?.title || best.fileName,
     best.metadata?.resourceType,
   );
 
   return best;
+};
+
+/**
+ * Search catalog entries (metadata only) for document-like resources matching the query.
+ * Operates purely on in-memory catalog metadata — does NOT require Laragon to be running.
+ * Returns [{entry, score}] sorted by score desc, filtered to score > 0.
+ */
+const searchCatalogDocuments = (query, catalog) => {
+  if (!catalog || !Array.isArray(catalog)) return [];
+  const q = normalizeText(query);
+  const isDocQuery = /\b(document|formulaire|form|pdf|fichier|t[eé]l[eé]charger|download|demande|dossier|certificate|attestation|relev[eé]|re[cç]u|receipt)\b/i.test(query);
+  if (!isDocQuery) return [];
+
+  const qTokens = tokenize(q).filter((t) => !GENERIC_RESOURCE_QUERY_TERMS.has(t));
+  if (qTokens.length === 0) return [];
+
+  const scored = [];
+  for (const entry of catalog) {
+    const title   = normalizeText(entry.title || entry.name || '');
+    const desc    = normalizeText(entry.description || '');
+    const ext     = (entry.fileType || entry.extension || '').toLowerCase().replace('.', '');
+    const intents = (entry.intents || []).map(normalizeText).join(' ');
+    let score = 0;
+
+    for (const tok of qTokens) {
+      if (wholeWordIncludes(title, tok)) score += 2.0;
+      else if (title.includes(tok))       score += 1.0;
+      if (desc.includes(tok))             score += 0.5;
+      if (intents.includes(tok))          score += 0.3;
+    }
+
+    if (['pdf', 'doc', 'docx', 'xls', 'xlsx'].includes(ext)) score += 0.5;
+
+    if (score > 0) scored.push({ entry, score });
+  }
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 5);
 };
 
 module.exports = {
@@ -1554,6 +2006,10 @@ module.exports = {
   ResourceCatalogUnavailableError,
   findMatchingResource,
   findMatchingResources,
+  buildCatalogFileUrl,
   debugResourceCatalogMatch,
   loadResourceCatalog,
+  normalizeResourceSearchQuery,
+  selectCatalogFile,
+  searchCatalogDocuments,
 };

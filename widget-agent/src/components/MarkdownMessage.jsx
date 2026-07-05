@@ -55,6 +55,36 @@ const normalizeMarkdownTables = (value = '') => {
   return normalized.join('\n');
 };
 
+// Turns single newlines into Markdown hard breaks so stacked "**Label:** value" lines render on
+// separate lines (react-markdown treats a lone newline as a space). Code blocks, tables, and
+// blank-line paragraph breaks are left untouched.
+const hardenSoftLineBreaks = (value = '') => {
+  const lines = String(value || '').split('\n');
+  let inCode = false;
+
+  return lines
+    .map((line, index) => {
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('```')) {
+        inCode = !inCode;
+        return line;
+      }
+      if (inCode) return line;
+
+      const next = lines[index + 1];
+      if (index === lines.length - 1) return line;
+      if (!trimmed) return line; // paragraph break
+      if (!next || !next.trim()) return line; // next is blank -> paragraph break
+      if (line.includes('|')) return line; // table row
+      if (next.trim().startsWith('```')) return line;
+      if (/\s$/.test(line)) return line; // already a hard break
+
+      return `${line}  `;
+    })
+    .join('\n');
+};
+
 function MarkdownMessage({ content = '' }) {
   return (
     <div className="markdown-message">
@@ -81,7 +111,7 @@ function MarkdownMessage({ content = '' }) {
           },
         }}
       >
-        {normalizeMarkdownTables(content)}
+        {hardenSoftLineBreaks(normalizeMarkdownTables(content))}
       </ReactMarkdown>
     </div>
   );

@@ -327,6 +327,9 @@ def _is_resource_lookup_message(message: str) -> bool:
     if "saved beneficiary" in text or "beneficiary profile" in text or "hiba msallem" in text:
         return True
 
+    if "checkbook" in text or "chequebook" in text:
+        return True
+
     if "student" in text and ("loan" in text or "credit" in text or "financing" in text):
         return True
 

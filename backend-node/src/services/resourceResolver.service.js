@@ -1,15 +1,24 @@
-const axios = require('axios');
+const fs = require('fs/promises');
 const path = require('path');
 const { PDFParse } = require('pdf-parse');
 const env = require('../config/env');
+const { selectCatalogFile } = require('./resourceCatalog.service');
 
 const RESOURCE_SERVER_BASE_URL = env.resourceServerBaseUrl;
 const RESOURCE_JSON_BASE_URL = env.resourceJsonBaseUrl;
 const RESOURCE_DOCUMENT_BASE_URL = env.resourceDocumentBaseUrl;
+const RESOURCE_ROOT_DIR = env.resourceRootDir;
 const ALLOWED_RESOURCE_PREFIX = `${RESOURCE_SERVER_BASE_URL}/`;
-const REQUEST_TIMEOUT_MS = 10000;
 const TEXT_PREVIEW_LIMIT = 50000;
 const PDF_MIN_READABLE_CHARS = Number(process.env.PDF_MIN_READABLE_CHARS || 20);
+const ALLOWED_RESOURCE_FOLDERS = new Set(['documents', 'json', 'txt', 'images']);
+const ALLOWED_RESOURCE_EXTENSIONS = new Set(['.pdf', '.json', '.txt', '.png', '.jpg', '.jpeg']);
+
+// Verbose resolver tracing is opt-in (DEBUG_RESOURCE_SEARCH=true). In normal mode only
+// compact errors are logged — never URLs, file contents, OCR text, or base64.
+const debugLog = (...args) => {
+  if (env.debugResourceSearch) console.log(...args);
+};
 
 class ResourceResolverError extends Error {
   constructor(message, statusCode = 400) {
@@ -45,19 +54,43 @@ const assertAllowedResourceUrl = (urlValue) => {
     throw new ResourceResolverError('Invalid resource URL');
   }
 
+  const allowedPath = allowedBase.pathname.replace(/\/$/, '');
+  const relativePath = parsed.pathname.slice(allowedPath.length).replace(/^\/+/, '');
+  const segments = relativePath.split('/').filter(Boolean);
+  const decodedSegments = segments.map((segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  });
+  const [folder, fileName] = decodedSegments;
+  const extension = path.extname(fileName || '').toLowerCase();
+
   if (
     parsed.protocol !== allowedBase.protocol ||
     parsed.host !== allowedBase.host ||
-    !parsed.pathname.startsWith(allowedBase.pathname) ||
+    !parsed.pathname.startsWith(`${allowedPath}/`) ||
     !parsed.href.startsWith(ALLOWED_RESOURCE_PREFIX) ||
-    hasTraversalSegment(parsed)
+    hasTraversalSegment(parsed) ||
+    segments.length !== 2 ||
+    !ALLOWED_RESOURCE_FOLDERS.has(folder) ||
+    !ALLOWED_RESOURCE_EXTENSIONS.has(extension) ||
+    path.isAbsolute(folder || '') ||
+    path.isAbsolute(fileName || '') ||
+    String(fileName || '').includes('/') ||
+    String(fileName || '').includes('\\')
   ) {
     throw new ResourceResolverError(
       `Only ${ALLOWED_RESOURCE_PREFIX} URLs are allowed`,
     );
   }
 
-  return parsed.href;
+  return {
+    href: parsed.href,
+    folder,
+    fileName,
+  };
 };
 
 const resolveFileUrl = (fileUrl) => {
@@ -66,18 +99,39 @@ const resolveFileUrl = (fileUrl) => {
   }
 
   const trimmed = fileUrl.trim();
-  const resourceBase = new URL(ALLOWED_RESOURCE_PREFIX);
-  const resourcePath = resourceBase.pathname.replace(/\/$/, '');
-
-  if (trimmed.startsWith(`${resourcePath}/`)) {
-    return assertAllowedResourceUrl(`${resourceBase.origin}${trimmed}`);
-  }
-
-  if (trimmed.startsWith('documents/') || trimmed.startsWith('json/')) {
+  if (
+    trimmed.startsWith('documents/') ||
+    trimmed.startsWith('json/') ||
+    trimmed.startsWith('txt/') ||
+    trimmed.startsWith('images/')
+  ) {
     return assertAllowedResourceUrl(`${ALLOWED_RESOURCE_PREFIX}${trimmed}`);
   }
 
   return assertAllowedResourceUrl(trimmed);
+};
+
+const resolveTrustedResourcePath = ({ folder, fileName }) => {
+  const resolvedRoot = path.resolve(RESOURCE_ROOT_DIR);
+  const resolvedFile = path.resolve(resolvedRoot, folder, fileName);
+  if (
+    !resolvedFile.startsWith(`${resolvedRoot}${path.sep}`) ||
+    path.dirname(resolvedFile) !== path.resolve(resolvedRoot, folder)
+  ) {
+    throw new ResourceResolverError('Invalid resource file path');
+  }
+  return resolvedFile;
+};
+
+const findSelectedCatalogFileUrl = (resourceJson = {}, options = {}) => {
+  if (!Array.isArray(resourceJson.files) || !resourceJson.files.length) {
+    return null;
+  }
+
+  const selectedFile = selectCatalogFile(resourceJson.files, {
+    messageText: options.messageText || '',
+  });
+  return selectedFile?.fileUrl || null;
 };
 
 const findFileUrl = (value) => {
@@ -105,14 +159,21 @@ const findFileUrl = (value) => {
   return null;
 };
 
-const fetchJsonResource = async (resourceUrl) => {
-  const response = await axios.get(resourceUrl, {
-    responseType: 'json',
-    timeout: REQUEST_TIMEOUT_MS,
-    validateStatus: (status) => status >= 200 && status < 300,
-  });
+const contentTypeForPath = (filePath = '') => {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === '.pdf') return 'application/pdf';
+  if (extension === '.json') return 'application/json';
+  if (extension === '.txt') return 'text/plain';
+  if (extension === '.png') return 'image/png';
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+  return 'application/octet-stream';
+};
 
-  return response.data;
+const fetchJsonResource = async (resourceUrl) => {
+  const trusted = assertAllowedResourceUrl(resourceUrl);
+  const resourcePath = resolveTrustedResourcePath(trusted);
+  const raw = await fs.readFile(resourcePath, 'utf8');
+  return JSON.parse(raw);
 };
 
 const isPdfFile = (fileUrl, contentType) => {
@@ -163,19 +224,29 @@ const extractPdfText = async (fileBuffer) => {
   }
 };
 
+// Fetches the actual resource file from RESOURCE_ROOT_DIR only. The public URL is validated
+// against RESOURCE_BASE_URL first, then translated to <RESOURCE_ROOT_DIR>/<folder>/<fileName>.
 const fetchTrustedResourceFile = async (fileUrl) => {
-  console.log('[resource-resolver] trusted resource file URL validated');
-  const response = await axios.get(fileUrl, {
-    responseType: 'arraybuffer',
-    timeout: REQUEST_TIMEOUT_MS,
-    validateStatus: (status) => status >= 200 && status < 300,
-  });
-  const contentType = String(response.headers['content-type'] || '').split(';')[0];
-  const fileBuffer = Buffer.from(response.data);
+  debugLog('[resource-resolver] trusted resource file URL validated');
+  const trusted = assertAllowedResourceUrl(fileUrl);
+  const resourcePath = resolveTrustedResourcePath(trusted);
+  const fileBuffer = await fs.readFile(resourcePath);
+  const contentType = contentTypeForPath(resourcePath);
 
   if (isTextFile(fileUrl, contentType)) {
     const fileText = truncateText(fileBuffer.toString('utf8'));
-    console.log('[resource-resolver] text bytes fetched:', {
+    let resourceJsonData = null;
+    if (path.extname(new URL(fileUrl).pathname).toLowerCase() === '.json') {
+      try {
+        const parsed = JSON.parse(fileText);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          resourceJsonData = parsed;
+        }
+      } catch {
+        resourceJsonData = null;
+      }
+    }
+    debugLog('[resource-resolver] text bytes fetched:', {
       contentType,
       byteCount: fileBuffer.length,
       charCount: fileText.length,
@@ -188,11 +259,12 @@ const fetchTrustedResourceFile = async (fileUrl) => {
       resourceFileType: path.extname(new URL(fileUrl).pathname).toLowerCase() === '.json' ? 'json' : 'txt',
       needsVision: false,
       extractionStatus: fileText ? 'extracted' : 'empty_text',
+      ...(resourceJsonData ? { resourceJsonData } : {}),
     };
   }
 
   if (isImageFile(fileUrl, contentType)) {
-    console.log('[resource-resolver] image bytes fetched:', {
+    debugLog('[resource-resolver] image bytes fetched:', {
       contentType,
       byteCount: fileBuffer.length,
     });
@@ -201,13 +273,14 @@ const fetchTrustedResourceFile = async (fileUrl) => {
       fileBuffer,
       fileSize: fileBuffer.length,
       resourceFileType: 'image',
-      needsVision: true,
-      extractionStatus: 'visual_ready_for_vision',
+      needsVision: false,
+      needsOcr: true,
+      extractionStatus: 'image_ready_for_ocr',
     };
   }
 
   if (!isPdfFile(fileUrl, contentType)) {
-    console.log('[resource-resolver] extractionStatus:', 'unsupported_file_type');
+    debugLog('[resource-resolver] extractionStatus:', 'unsupported_file_type');
     return {
       contentType,
       resourceFileType: 'unsupported',
@@ -225,7 +298,7 @@ const fetchTrustedResourceFile = async (fileUrl) => {
   }
   const readableChars = readableCharacterCount(fileText);
   if (readableChars >= PDF_MIN_READABLE_CHARS) {
-    console.log('[resource-resolver] PDF text extracted:', {
+    debugLog('[resource-resolver] PDF text extracted:', {
       contentType,
       byteCount: fileBuffer.length,
       charCount: fileText.length,
@@ -242,7 +315,7 @@ const fetchTrustedResourceFile = async (fileUrl) => {
     };
   }
 
-  console.log('[resource-resolver] PDF bytes fetched:', {
+  debugLog('[resource-resolver] PDF bytes fetched:', {
     contentType,
     byteCount: fileBuffer.length,
     readableChars,
@@ -250,25 +323,29 @@ const fetchTrustedResourceFile = async (fileUrl) => {
 
   return {
     contentType,
-    fileBuffer,
+    fileText,
     fileSize: fileBuffer.length,
     resourceFileType: 'pdf',
-    needsVision: true,
-    extractionStatus: 'pdf_ready_for_vision',
+    needsVision: false,
+    extractionStatus: textExtractionError ? 'pdf_text_extraction_failed' : 'empty_text',
     ...(textExtractionError ? { extractionError: textExtractionError } : {}),
   };
 };
 
-const resolveResourcePayload = async (resourceJson, resourceUrl = null) => {
-  const rawFileUrl = findFileUrl(resourceJson);
+// Resolves a resource's actual file strictly from the Laragon resource server. There is no local
+// disk fallback: an untrusted/unreachable URL returns a status marker, never a locally read file.
+const resolveResourcePayload = async (resourceJson, resourceUrl = null, options = {}) => {
+  const rawFileUrl = findSelectedCatalogFileUrl(resourceJson, options) || findFileUrl(resourceJson);
 
   if (!rawFileUrl) {
-    console.log('[resource-resolver] extractionStatus:', 'no_file_url');
+    debugLog('[resource-resolver] extractionStatus:', 'no_file_url');
     return {
       resourceJson,
       fileUrl: null,
-      contentType: null,
-      extractionStatus: 'no_file_url',
+      contentType: 'application/json',
+      resourceFileType: 'json',
+      needsVision: false,
+      extractionStatus: 'metadata_only',
     };
   }
 
@@ -276,8 +353,8 @@ const resolveResourcePayload = async (resourceJson, resourceUrl = null) => {
   try {
     fileUrl = resolveFileUrl(rawFileUrl);
   } catch {
-    console.log('[resource-resolver] blocked untrusted resource file URL');
-    console.log('[resource-resolver] extractionStatus:', 'blocked_url');
+    debugLog('[resource-resolver] blocked untrusted resource file URL');
+    debugLog('[resource-resolver] extractionStatus:', 'blocked_url');
     return {
       resourceJson,
       fileUrl: rawFileUrl,
@@ -287,18 +364,28 @@ const resolveResourcePayload = async (resourceJson, resourceUrl = null) => {
   }
 
   try {
-    const fileResult = await fetchTrustedResourceFile(fileUrl);
-    console.log('[resource-resolver] extractionStatus:', fileResult.extractionStatus);
+    const fileResult = await fetchTrustedResourceFile(fileUrl.href);
+    debugLog('[resource-resolver] extractionStatus:', fileResult.extractionStatus);
+    const resolvedResourceJson = fileResult.resourceJsonData
+      ? {
+          ...resourceJson,
+          ...fileResult.resourceJsonData,
+          files: resourceJson.files,
+          routingPolicy: resourceJson.routingPolicy,
+          ...(fileResult.resourceFileType ? { resourceFileType: fileResult.resourceFileType } : {}),
+        }
+      : resourceJson;
     return {
-      resourceJson,
-      fileUrl,
+      resourceJson: resolvedResourceJson,
+      fileUrl: fileUrl.href,
       ...fileResult,
+      resourceJsonData: undefined,
     };
   } catch (error) {
-    console.log('[resource-resolver] extractionStatus:', 'failed');
+    console.error('[resource-resolver] resource fetch failed:', error.message || 'unknown error');
     return {
       resourceJson,
-      fileUrl,
+      fileUrl: fileUrl.href,
       contentType: null,
       extractionStatus: 'failed',
       extractionError: error.message || 'File fetch or extraction failed',
@@ -307,9 +394,9 @@ const resolveResourcePayload = async (resourceJson, resourceUrl = null) => {
 };
 
 const resolveResource = async (jsonResourceUrl) => {
-  const resourceUrl = assertAllowedResourceUrl(jsonResourceUrl);
-  const resourceJson = await fetchJsonResource(resourceUrl);
-  return resolveResourcePayload(resourceJson, resourceUrl);
+  const trusted = assertAllowedResourceUrl(jsonResourceUrl);
+  const resourceJson = await fetchJsonResource(trusted.href);
+  return resolveResourcePayload(resourceJson, trusted.href);
 };
 
 module.exports = {

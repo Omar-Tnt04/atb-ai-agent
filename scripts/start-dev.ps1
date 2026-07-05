@@ -51,7 +51,7 @@ Start-DevWindow `
 Start-DevWindow `
     -Title "ATB AI Service" `
     -RelativePath "ai-service-python" `
-    -Command ".\venv\Scripts\Activate.ps1; uvicorn app.main:app --reload --port 8000"
+    -Command "if (Test-Path '.\.venv\Scripts\Activate.ps1') { .\.venv\Scripts\Activate.ps1 } elseif (Test-Path '.\venv\Scripts\Activate.ps1') { .\venv\Scripts\Activate.ps1 } else { Write-Error 'No venv found. Run: python -m venv .venv' }; python -m uvicorn app.main:app --reload --port 8000"
 
 Start-DevWindow `
     -Title "ATB Frontend" `

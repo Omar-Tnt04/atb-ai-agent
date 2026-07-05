@@ -23,12 +23,36 @@ const RESOURCE_ALIASES = [
     aliases: ['ATB Connect', 'activate ATB Connect', 'online banking activation', 'mobile banking activation', 'activation guide', 'digital banking activation'],
   },
   {
+    title: 'Debit Card Activation Notice',
+    aliases: [
+      'debit card activation',
+      'card activation notice',
+      'debit card activation image',
+      'card activation image',
+      'activate my debit card',
+      'debit card activation notice',
+      'card activation notice image',
+    ],
+  },
+  {
     title: 'Mobile Banking Security Notice',
     aliases: ['security notice', 'mobile banking security', 'OTP advice', 'avoid sharing OTP', 'banking security', 'suspicious transactions'],
   },
   {
     title: 'Credit Card Limit Notice',
-    aliases: ['credit card limit', 'card limit notice', 'available card limit', 'payment due date', 'minimum payment', 'card 1122'],
+    aliases: [
+      'credit card limit',
+      'card limit',
+      'card limit notice',
+      'available card limit',
+      'available limit',
+      'payment due date',
+      'card payment due',
+      'card payment due date',
+      'minimum payment',
+      'card notice',
+      'card 1122',
+    ],
   },
   {
     title: 'Standing Order - Monthly Rent',
@@ -89,6 +113,83 @@ const RESOURCE_ALIASES = [
   {
     title: 'Foreign Currency Exchange Receipt',
     aliases: ['exchange receipt', 'currency exchange', 'EUR exchange', 'TND to EUR', 'exchange rate'],
+  },
+  {
+    title: 'Account Fee Notice',
+    aliases: [
+      'account fee notice',
+      'fee notice',
+      'account fee',
+      'scheduled fee',
+      'fee image',
+      'fee billing date',
+    ],
+  },
+  {
+    title: 'Branch Queue Ticket',
+    aliases: [
+      'branch queue ticket',
+      'queue ticket',
+      'my queue ticket',
+      'branch queue',
+      'queue number',
+      'wait time',
+    ],
+  },
+  {
+    title: 'Savings Goal Progress',
+    aliases: [
+      'savings goal progress',
+      'savings goal',
+      'goal progress',
+      'my savings goal',
+      'savings goal image',
+      'saved amount',
+    ],
+  },
+  {
+    title: 'Account Overdraft Alert',
+    aliases: [
+      'account overdraft alert',
+      'overdraft alert',
+      'overdraft notice',
+      'overdraft threshold',
+      'overdraft warning',
+      'overdraft image',
+    ],
+  },
+  {
+    title: 'IBAN Certificate Preview',
+    aliases: [
+      'iban certificate preview',
+      'iban certificate',
+      'my iban',
+      'iban image',
+      'iban preview',
+      'iban details',
+    ],
+  },
+  {
+    title: 'QR Merchant Payment Receipt',
+    aliases: [
+      'qr merchant payment receipt',
+      'qr receipt',
+      'qr payment receipt',
+      'qr payment',
+      'merchant receipt',
+      'qr code receipt',
+    ],
+  },
+  {
+    title: 'Monthly E-Statement Summary',
+    aliases: [
+      'monthly e-statement summary',
+      'e-statement',
+      'monthly statement',
+      'account e-statement',
+      'statement summary',
+      'monthly e statement',
+    ],
   },
 ].map((item) => ({
   ...item,
@@ -165,7 +266,7 @@ const matchResourceAlias = (message = '') => {
 const findAliasMatchesInCatalog = (message = '', catalog = []) => {
   return catalog
     .map((entry) => {
-      const alias = scoreAliasForTitle(message, entry.metadata?.title || entry.fileName || '');
+      const alias = scoreAliasForTitle(message, entry.metadata?.title || '');
       return {
         ...entry,
         aliasScore: alias.score,

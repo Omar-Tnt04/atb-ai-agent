@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const { logArchitecture } = require('./architectureLogger.service');
 
 const MEMORY_TTL_MS = 60 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 10 * 60 * 1000;
@@ -7,14 +6,7 @@ const MAX_RECENT_MESSAGES = 10;
 const MAX_THREAD_MESSAGES = 100;
 const MAX_RESOURCE_HISTORY = 20;
 const MEMORY_TEXT_LIMIT = Number(process.env.MAX_MEMORY_TEXT_CHARS || 500);
-const DEFAULT_VISION_SUMMARY_CACHE_MAX_ITEMS = 20;
-const DEFAULT_VISION_SUMMARY_CACHE_TTL_MS = 300000;
-const MAX_CACHED_VISION_PAGE_SUMMARIES = 5;
-const MAX_CACHED_VISION_EVIDENCE = 5;
-const MAX_CACHED_VISION_FIELDS = 20;
-
 const memories = new Map();
-const pdfVisionCache = new Map();
 
 const nowIso = () => new Date().toISOString();
 
@@ -31,33 +23,6 @@ const memoryKey = ({ userId, threadId }) =>
 const hashText = (value = '') =>
   crypto.createHash('sha256').update(String(value || '')).digest('hex').slice(0, 24);
 
-const cacheKey = ({ resourceId, pdfUrl }) =>
-  `${normalizeIdPart(resourceId || hashText(pdfUrl), 'resource')}::${hashText(pdfUrl)}`;
-
-const numberEnv = (name, fallback) => {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) ? value : fallback;
-};
-
-const visionSummaryCacheConfig = () => ({
-  enabled: process.env.ENABLE_VISION_SUMMARY_CACHE === 'true',
-  maxItems: Math.max(
-    0,
-    numberEnv('VISION_SUMMARY_CACHE_MAX_ITEMS', DEFAULT_VISION_SUMMARY_CACHE_MAX_ITEMS),
-  ),
-  ttlMs: Math.max(
-    0,
-    numberEnv('VISION_SUMMARY_CACHE_TTL_MS', DEFAULT_VISION_SUMMARY_CACHE_TTL_MS),
-  ),
-});
-
-const logVisionSummaryCache = (stage, payload = {}) => {
-  logArchitecture(stage, {
-    ...payload,
-    cacheItemCount: pdfVisionCache.size,
-  });
-};
-
 const emptyMemory = () => ({
   recentMessages: [],
   threadMessages: [],
@@ -72,86 +37,10 @@ const emptyMemory = () => ({
 const isExpired = (item) =>
   !item?.updatedAt || Date.now() - Date.parse(item.updatedAt) > MEMORY_TTL_MS;
 
-const isVisionSummaryExpired = (item, ttlMs) =>
-  ttlMs <= 0 || !item?.updatedAt || Date.now() - Date.parse(item.updatedAt) > ttlMs;
-
-const evictExpiredVisionSummaries = ({ ttlMs, requestId } = {}) => {
-  let evictedCount = 0;
-  for (const [key, item] of pdfVisionCache.entries()) {
-    if (isVisionSummaryExpired(item, ttlMs)) {
-      pdfVisionCache.delete(key);
-      evictedCount += 1;
-    }
-  }
-  if (evictedCount) {
-    logVisionSummaryCache('vision_summary_cache_evicted', {
-      requestId,
-      reason: 'ttl',
-      evictedCount,
-    });
-  }
-};
-
-const evictOldestVisionSummaries = ({ maxItems, requestId } = {}) => {
-  if (pdfVisionCache.size <= maxItems) return;
-
-  const entries = Array.from(pdfVisionCache.entries()).sort(([, a], [, b]) =>
-    Date.parse(a?.updatedAt || 0) - Date.parse(b?.updatedAt || 0),
-  );
-  let evictedCount = 0;
-  for (const [key] of entries) {
-    if (pdfVisionCache.size <= maxItems) break;
-    pdfVisionCache.delete(key);
-    evictedCount += 1;
-  }
-  if (evictedCount) {
-    logVisionSummaryCache('vision_summary_cache_evicted', {
-      requestId,
-      reason: 'max_items',
-      maxItems,
-      evictedCount,
-    });
-  }
-};
-
-const compactCachedVisionSummary = (summary = {}) => ({
-  documentSummary: redactSensitiveText(summary.documentSummary || ''),
-  pageSummaries: Array.isArray(summary.pageSummaries)
-    ? summary.pageSummaries.slice(0, MAX_CACHED_VISION_PAGE_SUMMARIES).map((item) => ({
-        page: item?.page || null,
-        summary: redactSensitiveText(item?.summary || item?.text || item || ''),
-      }))
-    : [],
-  extractedFields: Object.fromEntries(
-    Object.entries(summary.extractedFields || {})
-      .filter(([key, value]) =>
-        !/password|token|secret|sms|otp|rib|card|accountnumber|evidence|pagesummaries|fulltext|pdf|base64|prompt|response/i.test(key) &&
-        value !== undefined &&
-        value !== null,
-      )
-      .slice(0, MAX_CACHED_VISION_FIELDS)
-      .map(([key, value]) => [key, sanitizeStoredValue(value)]),
-  ),
-  evidence: Array.isArray(summary.evidence)
-    ? summary.evidence.slice(0, MAX_CACHED_VISION_EVIDENCE).map((item) => ({
-        page: item?.page || null,
-        text: redactSensitiveText(item?.text || item?.evidence_text || item || ''),
-      }))
-    : [],
-  confidence: Number.isFinite(summary.confidence) ? summary.confidence : 0,
-  updatedAt: nowIso(),
-});
-
 const cleanupExpiredMemory = () => {
   for (const [key, item] of memories.entries()) {
     if (isExpired(item)) {
       memories.delete(key);
-    }
-  }
-
-  for (const [key, item] of pdfVisionCache.entries()) {
-    if (isVisionSummaryExpired(item, visionSummaryCacheConfig().ttlMs)) {
-      pdfVisionCache.delete(key);
     }
   }
 };
@@ -237,6 +126,22 @@ const SAFE_RESOURCE_KEYS = new Set([
   'amount',
   'currency',
   'dueDate',
+  // security-notice / advisory fields
+  'recommendedAction',
+  'recommendation',
+  'advice',
+  'topic',
+  'subject',
+  'riskLevel',
+  'risk',
+  'lastUpdate',
+  'updatedAt',
+  'noticeId',
+  // card / activation-notice fields (image OCR + vision grounding)
+  'cardType',
+  'activationChannel',
+  'expiry',
+  'recommendedStep',
 ]);
 
 const RESOURCE_FIELD_KEYS = [
@@ -552,9 +457,7 @@ const updateAgentMemory = ({
       lastActiveResource,
     );
   }
-  if (lastVisionResult) {
-    memory.lastVisionResult = sanitizeVisionResult(lastVisionResult);
-  }
+  void lastVisionResult;
   if (lastCase) {
     memory.lastCase = lastCase;
   }
@@ -567,92 +470,12 @@ const updateAgentMemory = ({
   return memory;
 };
 
-const getPdfVisionCache = ({ resourceId, pdfUrl, requestId } = {}) => {
-  if (!pdfUrl) return null;
+const getPdfVisionCache = () => null;
 
-  const config = visionSummaryCacheConfig();
-  if (!config.enabled) {
-    const evictedCount = pdfVisionCache.size;
-    pdfVisionCache.clear();
-    logVisionSummaryCache('vision_summary_cache_disabled', {
-      requestId,
-      resourceId: normalizeIdPart(resourceId, 'resource'),
-      evictedCount,
-    });
-    return null;
-  }
-
-  evictExpiredVisionSummaries({ ttlMs: config.ttlMs, requestId });
-
-  const key = cacheKey({ resourceId, pdfUrl });
-  const cached = pdfVisionCache.get(key);
-  if (cached && !isVisionSummaryExpired(cached, config.ttlMs)) {
-    logVisionSummaryCache('vision_summary_cache_hit', {
-      requestId,
-      resourceId: normalizeIdPart(resourceId, 'resource'),
-      cacheKeyHash: hashText(key),
-    });
-    return cached;
-  }
-
-  if (cached) {
-    pdfVisionCache.delete(key);
-    logVisionSummaryCache('vision_summary_cache_evicted', {
-      requestId,
-      resourceId: normalizeIdPart(resourceId, 'resource'),
-      cacheKeyHash: hashText(key),
-      reason: 'ttl',
-      evictedCount: 1,
-    });
-  }
-
-  logVisionSummaryCache('vision_summary_cache_miss', {
-    requestId,
-    resourceId: normalizeIdPart(resourceId, 'resource'),
-    cacheKeyHash: hashText(key),
-  });
-  return null;
-};
-
-const setPdfVisionCache = ({ resourceId, pdfUrl, visionResult, requestId } = {}) => {
-  if (!pdfUrl || !visionResult) return null;
-
-  const config = visionSummaryCacheConfig();
-  if (!config.enabled) {
-    const evictedCount = pdfVisionCache.size;
-    pdfVisionCache.clear();
-    logVisionSummaryCache('vision_summary_cache_disabled', {
-      requestId,
-      resourceId: normalizeIdPart(resourceId, 'resource'),
-      evictedCount,
-    });
-    return null;
-  }
-
-  evictExpiredVisionSummaries({ ttlMs: config.ttlMs, requestId });
-  if (config.maxItems <= 0) {
-    const evictedCount = pdfVisionCache.size;
-    pdfVisionCache.clear();
-    logVisionSummaryCache('vision_summary_cache_evicted', {
-      requestId,
-      resourceId: normalizeIdPart(resourceId, 'resource'),
-      reason: 'max_items',
-      maxItems: config.maxItems,
-      evictedCount,
-    });
-    return null;
-  }
-
-  const cached = compactCachedVisionSummary(sanitizeVisionResult(visionResult));
-  const key = cacheKey({ resourceId, pdfUrl });
-  pdfVisionCache.set(key, cached);
-  evictOldestVisionSummaries({ maxItems: config.maxItems, requestId });
-  return cached;
-};
+const setPdfVisionCache = () => null;
 
 const resetAgentMemoryForTests = () => {
   memories.clear();
-  pdfVisionCache.clear();
 };
 
 module.exports = {

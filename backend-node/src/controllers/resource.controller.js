@@ -8,6 +8,7 @@ const {
 } = require('../services/resourceResolver.service');
 const {
   streamResourceDownload,
+  streamResourceView,
 } = require('../services/resourceDownload.service');
 const { logAgentStep } = require('../services/agentLogger.service');
 
@@ -100,8 +101,39 @@ const downloadApprovedResource = async (req, res) => {
   }
 };
 
+const viewApprovedResource = async (req, res) => {
+  const { viewId } = req.params;
+
+  if (!/^[a-f0-9]{32}$/.test(viewId)) {
+    const payload = {
+      downloadId: viewId,
+      fileUrl: null,
+      success: false,
+      reason: 'invalid_view_id',
+    };
+    console.log('[resource-download] request:', payload);
+    logAgentStep(null, 'resource_download_requested', payload);
+    return res.status(404).json({ success: false, message: 'Image not found' });
+  }
+
+  try {
+    return await streamResourceView(viewId, res);
+  } catch (error) {
+    const payload = {
+      downloadId: viewId,
+      fileUrl: null,
+      success: false,
+      reason: error.message || 'resource_view_failed',
+    };
+    console.log('[resource-download] request:', payload);
+    logAgentStep(null, 'resource_download_requested', payload);
+    return res.status(404).json({ success: false, message: 'Image not found' });
+  }
+};
+
 module.exports = {
   debugCatalogMatch,
   downloadApprovedResource,
   resolveResourceUrl,
+  viewApprovedResource,
 };

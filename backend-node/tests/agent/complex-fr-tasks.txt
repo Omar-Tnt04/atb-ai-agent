@@ -1,0 +1,14 @@
+# Complex French user tasks for the index-guided agent.
+# One task per line. Lines starting with # are comments.
+# Run: node scripts/run-agent-task.js --file tests/agent/complex-fr-tasks.txt
+
+Je veux recevoir des notifications sur les mouvements de mon compte sans me connecter à la banque en ligne. Trouve le document nécessaire pour activer ce service.
+Je veux connaître les frais appliqués par la banque avant d'ouvrir un compte. Trouve le document officiel qui détaille ces frais.
+Je veux ouvrir un compte avec une autre personne. Trouve le document adapté, pas le formulaire de compte individuel.
+Je veux demander une carte bancaire pour mon compte. Trouve le document officiel de demande.
+Je veux ouvrir un compte, mais je cherche le fichier à remplir, pas la page devenir client.
+Je veux gérer mon compte bancaire depuis mon téléphone et m'abonner au service mobile. Trouve le formulaire officiel correspondant.
+Je veux consulter mes comptes à distance depuis internet. Trouve le document d'inscription adapté.
+Je pars à l'étranger et je veux récupérer un montant lié à mon allocation touristique. Trouve la demande correspondante.
+Je veux financer un achat personnel et préparer le dossier de demande. Trouve le document de crédit adapté aux particuliers.
+Je veux savoir combien coûtent les opérations bancaires courantes. Trouve le document officiel avec les tarifs.

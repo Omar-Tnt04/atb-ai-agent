@@ -39,6 +39,8 @@ OLLAMA_TIMING_FIELDS = (
 
 
 def _log_ollama(event: str, **fields: Any) -> None:
+    if not settings.ARCHITECTURE_LOGS_ENABLED:
+        return
     details = " ".join(f"{key}={value}" for key, value in fields.items())
     print(f"[ollama] {event}{(' ' + details) if details else ''}", flush=True)
 
@@ -152,7 +154,20 @@ def _post_generate_json(
         raise OllamaServiceError("Direct vision is unsupported when MODEL_ROUTING_MODE=text_only")
 
     request_payload = _build_generate_payload(payload, selection)
-    fields = log_fields or {}
+    runtime_field_keys = {
+        "model",
+        "keep_alive",
+        "unloadAfterResponse",
+        "model_routing_mode",
+        "selected_model",
+        "selected_model_reason",
+        "vision_used",
+    }
+    fields = {
+        key: value
+        for key, value in (log_fields or {}).items()
+        if key not in runtime_field_keys
+    }
     response: requests.Response | None = None
     timer = startTimer(request_kind)
 
@@ -218,7 +233,6 @@ def _post_generate_json(
             status_code=getattr(failed_response, "status_code", "none"),
             exception_type=exc.__class__.__name__,
             exception=_preview_text(exc),
-            response_preview=_preview_text(getattr(failed_response, "text", "")),
             **_ollama_runtime_fields(selection),
             **fields,
         )
@@ -240,7 +254,6 @@ def _post_generate_json(
             status_code=getattr(response, "status_code", "none"),
             exception_type=exc.__class__.__name__,
             exception=_preview_text(exc),
-            response_preview=_preview_text(getattr(response, "text", "")),
             **_ollama_runtime_fields(selection),
             **fields,
         )
@@ -369,7 +382,6 @@ def _extract_json_object_for_vision(
                 "vision_parse_failed",
                 error_type=exc.__class__.__name__,
                 error=_preview_text(exc),
-                response_preview=_preview_text(text),
             )
         return None
 
@@ -579,10 +591,10 @@ def plan_intent_with_ollama(request: AgentAnalyzeRequest) -> dict[str, Any]:
     if not isinstance(response_text, str):
         raise OllamaServiceError("Ollama response text is missing")
 
-    logArchitecture("planner_raw_output_preview", {
+    logArchitecture("planner_raw_output_received", {
         "requestId": request.requestId,
         "threadId": request.threadId,
-        "preview": _preview_text(response_text),
+        "responseLength": len(response_text or ""),
     })
 
     try:
@@ -591,7 +603,7 @@ def plan_intent_with_ollama(request: AgentAnalyzeRequest) -> dict[str, Any]:
         logArchitecture("planner_json_extract_failed", {
             "requestId": request.requestId,
             "threadId": request.threadId,
-            "planner_raw_output_preview": _preview_text(response_text),
+            "responseLength": len(response_text or ""),
             "error": str(exc),
         }, level="warning")
         raise
@@ -599,9 +611,201 @@ def plan_intent_with_ollama(request: AgentAnalyzeRequest) -> dict[str, Any]:
     logArchitecture("planner_json_extract_success", {
         "requestId": request.requestId,
         "threadId": request.threadId,
-        "mode": parsed.get("mode"),
+        "intentType": parsed.get("intentType") or parsed.get("mode"),
+        "resourceQueryLength": len(str(parsed.get("resourceQuery") or parsed.get("resourceSearchQuery") or "")),
+        "userGoalLength": len(str(parsed.get("userGoal") or "")),
+        "missingFieldCount": len(parsed.get("missingFields") or []) if isinstance(parsed.get("missingFields"), list) else 0,
     })
     return parsed
+
+
+def rerank_resources_with_ollama(
+    message: str,
+    candidates: list[dict[str, Any]],
+    *,
+    request_id: str | None = None,
+    thread_id: str | None = None,
+) -> dict[str, Any]:
+    candidates_text = "\n".join(
+        f"ID: {c.get('id', '')}\n"
+        f"  Title: {c.get('title', '')}\n"
+        f"  Category: {c.get('category') or ''}\n"
+        f"  Description: {c.get('description') or ''}\n"
+        f"  Example queries: {'; '.join(c.get('exampleQueries') or [])}\n"
+        f"  Intents: {', '.join(c.get('intents') or [])}\n"
+        f"  Related actions: {', '.join(c.get('relatedActions') or [])}"
+        for c in candidates
+    )
+    prompt = (
+        f"You are a resource selection assistant for a banking app. "
+        f"Given the user's exact message, pick the single best matching resource from the list.\n\n"
+        f"User message: \"{message}\"\n\n"
+        f"Candidates:\n{candidates_text}\n\n"
+        f"Rules:\n"
+        f"- Exact entity, name, merchant, provider, or service mentions in the message must strongly favour that candidate.\n"
+        f"- Specific matches outrank generic category matches.\n"
+        f"- Generic words like payment, card, receipt, alert, account, transfer must NOT override a more specific entity match.\n\n"
+        f"Respond with valid JSON only:\n"
+        f'{{\"chosenId\": \"<id>\", \"reason\": \"<one short sentence>\", \"confidence\": 0.0}}'
+    )
+
+    try:
+        payload = _post_generate_json(
+            "reranker",
+            {
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {
+                    "temperature": 0,
+                    "num_predict": _max_predict(120),
+                },
+            },
+            timeout=20,
+            log_fields={
+                "requestId": request_id,
+                "threadId": thread_id,
+                "candidateCount": len(candidates),
+                "prompt_length": len(prompt),
+                "timeout_seconds": 20,
+            },
+        )
+    except requests.RequestException as exc:
+        raise OllamaServiceError("Ollama is unavailable for reranking") from exc
+
+    response_text, _ = _extract_ollama_text(payload)
+    if not isinstance(response_text, str):
+        raise OllamaServiceError("Ollama reranker response text is missing")
+
+    return _extract_json_object(response_text)
+
+
+def answer_from_descriptions_with_ollama(
+    message: str,
+    candidates: list[dict[str, Any]],
+    *,
+    request_id: str | None = None,
+    thread_id: str | None = None,
+) -> dict[str, Any]:
+    # ⚠️ Diagnostics-only. Answers FREELY from full catalog descriptions and is NOT used for trusted
+    # banking facts. The production flow uses reformulate_answer_from_facts on EXTRACTED facts only.
+    # Only id/title/description are sent — file metadata is never used as reasoning context.
+    candidates_text = "\n".join(
+        f"ID: {c.get('id', '')}\n"
+        f"  Title: {c.get('title', '')}\n"
+        f"  Description: {c.get('description') or ''}"
+        for c in candidates
+    )
+    prompt = (
+        "You are a banking assistant. Answer the user's question using ONLY the resource "
+        "descriptions below. Pick the single most relevant resource.\n\n"
+        f"User question: \"{message}\"\n\n"
+        f"Resources:\n{candidates_text}\n\n"
+        "Rules:\n"
+        "- Answer ONLY the user's specific question in one short sentence. Do NOT summarize, list, "
+        "or restate the resource. Do NOT say 'I found', 'This resource is', or mention the catalog/description.\n"
+        "- Use ONLY facts copied from the selected description. Never invent values.\n"
+        "- When a description contains rows of branch/service/hour facts, match the requested service "
+        "to the row that contains that service. Do NOT use the nearest or default branch unless the "
+        "user explicitly asks for the nearest/closest/default branch.\n"
+        "  Example: for a question about SME support or premium desk, answer with the branch whose row "
+        "lists that service, not the nearest/default branch.\n"
+        "- Bold every important value with **markdown**: branch/entity names, service names, dates, "
+        "amounts, hours, statuses, payment obligations. An answer with no bold is invalid.\n"
+        "- usedFacts must list the exact short fact strings (copied from the description) that justify "
+        "the answer. It must be non-empty when answerableFromDescription is true.\n"
+        "- If the descriptions do NOT contain enough facts to answer, set answerableFromDescription "
+        "to false, needsTrustedFileFetch to true, and answerMarkdown to an empty string.\n\n"
+        "Respond with valid JSON only:\n"
+        '{"selectedResourceId": "<id>", "confidence": 0.0, "answerableFromDescription": true, '
+        '"answerMarkdown": "<one-sentence answer with **bold** values>", '
+        '"usedFacts": ["exact short fact from description"], '
+        '"needsTrustedFileFetch": false}'
+    )
+
+    try:
+        payload = _post_generate_json(
+            "reranker",
+            {
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {
+                    "temperature": 0,
+                    "num_predict": _max_predict(400),
+                },
+            },
+            timeout=30,
+            log_fields={
+                "requestId": request_id,
+                "threadId": thread_id,
+                "candidateCount": len(candidates),
+                "prompt_length": len(prompt),
+                "timeout_seconds": 30,
+            },
+        )
+    except requests.RequestException as exc:
+        raise OllamaServiceError("Ollama is unavailable for description QA") from exc
+
+    response_text, _ = _extract_ollama_text(payload)
+    if not isinstance(response_text, str):
+        raise OllamaServiceError("Ollama description QA response text is missing")
+
+    return _extract_json_object(response_text)
+
+
+def reformulate_answer_from_facts(
+    user_question: str,
+    extracted_facts: dict[str, Any],
+    *,
+    request_id: str | None = None,
+    thread_id: str | None = None,
+) -> dict[str, Any]:
+    # The model receives ONLY the pre-extracted facts (never the full multi-row description), so it
+    # cannot mix rows. Its only job is natural wording.
+    facts_text = json.dumps(extracted_facts, ensure_ascii=False)
+    prompt = (
+        "You are a banking assistant. Reformulate the given FACTS into one natural sentence that "
+        "answers the user's question. You may ONLY use the values in FACTS.\n\n"
+        f"User question: \"{user_question}\"\n"
+        f"FACTS (the only allowed values): {facts_text}\n\n"
+        "Rules:\n"
+        "- Use ONLY values present in FACTS. Never add a branch, service, hour, address, or phone "
+        "that is not in FACTS.\n"
+        "- Answer the specific question. Do not list facts the user did not ask for.\n"
+        "- Do not include the support phone unless the question asks for it.\n"
+        "- Do not mention nearest/default branch.\n"
+        "- Bold every important value with **markdown** (branch name, service names, hours).\n"
+        "- One sentence. Do not say 'I found' or mention any catalog/description.\n\n"
+        "Respond with valid JSON only:\n"
+        '{"answerMarkdown": "<one sentence with **bold** values from FACTS>"}'
+    )
+
+    try:
+        payload = _post_generate_json(
+            "reranker",
+            {
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0, "num_predict": _max_predict(200)},
+            },
+            timeout=20,
+            log_fields={
+                "requestId": request_id,
+                "threadId": thread_id,
+                "prompt_length": len(prompt),
+                "timeout_seconds": 20,
+            },
+        )
+    except requests.RequestException as exc:
+        raise OllamaServiceError("Ollama is unavailable for reformulation") from exc
+
+    response_text, _ = _extract_ollama_text(payload)
+    if not isinstance(response_text, str):
+        raise OllamaServiceError("Ollama reformulation response text is missing")
+
+    return _extract_json_object(response_text)
 
 
 def _request_vision_generate(
@@ -611,22 +815,45 @@ def _request_vision_generate(
     attempt_number: int,
     log_context: dict[str, Any] | None = None,
 ) -> str:
+    raise OllamaServiceError("vision_model_disabled")
+
     context = log_context or {}
     selection = select_model(requires_vision=True)
+    timeout_seconds = max(1, settings.VISION_REQUEST_TIMEOUT_MS / 1000)
+    is_image_payload = bool(context.get("is_image_payload"))
     try:
+        _num_predict_override = context.get("num_predict")
+        _num_predict_default = 700 if is_image_payload else 1800
+        request_payload = {
+            "prompt": prompt,
+            "images": images,
+            "stream": False,
+            "options": {
+                "temperature": 0.0 if is_image_payload else 0.2,
+                "num_predict": _max_predict(_num_predict_override if _num_predict_override else _num_predict_default),
+            },
+        }
+        # Diagnostic: log Ollama request shape (no base64/prompt content)
+        print(
+            f"[vision-diag] ollama_request_shape"
+            f" model={selection.selected_model}"
+            f" endpoint={settings.OLLAMA_BASE_URL}{VISION_ENDPOINT}"
+            f" image_count={len(images)}"
+            f" image_base64_length={len(images[0]) if images else 0}"
+            f" timeout_seconds={timeout_seconds}"
+            f" think=none"
+            f" format=none"
+            f" temperature={request_payload['options']['temperature']}"
+            f" num_predict={request_payload['options']['num_predict']}"
+            f" num_predict_override={_num_predict_override}"
+            f" attempt={attempt}",
+            flush=True,
+        )
+
         payload = _post_generate_json(
             "vision",
-            {
-                "prompt": prompt,
-                "images": images,
-                "stream": False,
-                "think": False,
-                "options": {
-                    "temperature": 0.2,
-                    "num_predict": _max_predict(1800),
-                },
-            },
-            timeout=180,
+            request_payload,
+            timeout=timeout_seconds,
             log_fields={
                 "requestId": context.get("requestId"),
                 "threadId": context.get("threadId"),
@@ -635,10 +862,44 @@ def _request_vision_generate(
                 "attempt_number": attempt_number,
                 "image_count": len(images),
                 "prompt_length": len(prompt or ""),
-                "timeout_seconds": 180,
+                "timeout_seconds": timeout_seconds,
+                "selected_model": selection.selected_model,
+                "ocrTextLength": context.get("ocr_text_length"),
             },
         )
+    except requests.Timeout as exc:
+        print(
+            f"[vision-diag] ollama_timeout"
+            f" model={selection.selected_model}"
+            f" timeout_seconds={timeout_seconds}"
+            f" attempt={attempt}",
+            flush=True,
+        )
+        _log_ollama(
+            "vision_timeout",
+            attempt=attempt,
+            attempt_number=attempt_number,
+            model=selection.selected_model,
+            image_count=len(images),
+            endpoint=VISION_ENDPOINT,
+            prompt_length=len(prompt or ""),
+            timeout_seconds=timeout_seconds,
+            exception_type=exc.__class__.__name__,
+            vision_timeout=True,
+            **_routing_log_fields(selection),
+        )
+        raise OllamaServiceError("vision_timeout") from exc
     except requests.RequestException as exc:
+        failed_resp = getattr(exc, "response", None)
+        print(
+            f"[vision-diag] ollama_request_error"
+            f" model={selection.selected_model}"
+            f" exception_type={exc.__class__.__name__}"
+            f" http_status={getattr(failed_resp, 'status_code', 'none')}"
+            f" error={str(exc)[:200]}"
+            f" attempt={attempt}",
+            flush=True,
+        )
         _log_ollama(
             "vision_unavailable",
             attempt=attempt,
@@ -656,7 +917,7 @@ def _request_vision_generate(
         raise OllamaServiceError("Ollama response envelope was not JSON") from exc
 
     response_text, content_field = _extract_ollama_text(payload)
-    thinking_text = payload.get("thinking")
+    thinking_text = payload.get("thinking") or ""
     _log_ollama(
         "vision_payload",
         attempt=attempt,
@@ -665,13 +926,44 @@ def _request_vision_generate(
         endpoint=VISION_ENDPOINT,
         content_field=content_field,
         content_length=len(response_text or ""),
-        thinking_length=len(thinking_text or ""),
+        thinking_length=len(thinking_text),
         response_keys=_payload_keys(payload),
-        content_preview=_preview_text(response_text),
         **_routing_log_fields(selection),
     )
 
+
+    print(
+        f"[vision-diag] ollama_response_received"
+        f" model={selection.selected_model}"
+        f" content_field={content_field}"
+        f" response_length={len(response_text or '')}"
+        f" thinking_length={len(thinking_text)}"
+        f" done_reason={payload.get('done_reason', 'unknown')}"
+        f" eval_count={payload.get('eval_count', 'unknown')}"
+        f" error={payload.get('error', 'none')}"
+        f" payload_keys={_payload_keys(payload)}"
+        f" attempt={attempt}",
+        flush=True,
+    )
+
     if not isinstance(response_text, str) or not _strip_thinking_blocks(response_text):
+        is_thinking_overflow = (
+            bool(thinking_text)
+            and not (response_text or "").strip()
+            and payload.get("done_reason") == "length"
+        )
+        print(
+            f"[vision-diag] ollama_empty_response"
+            f" model={selection.selected_model}"
+            f" response_type={type(response_text).__name__}"
+            f" response_length={len(response_text or '')}"
+            f" thinking_length={len(thinking_text)}"
+            f" stripped_length={len(_strip_thinking_blocks(response_text or ''))}"
+            f" done_reason={payload.get('done_reason', 'unknown')}"
+            f" is_thinking_overflow={is_thinking_overflow}"
+            f" attempt={attempt}",
+            flush=True,
+        )
         _log_ollama(
             "vision_empty_response",
             attempt=attempt,
@@ -685,7 +977,7 @@ def _request_vision_generate(
             content_field=content_field,
             **_routing_log_fields(selection),
         )
-        raise OllamaServiceError("empty_ollama_response")
+        raise OllamaServiceError("thinking_overflow" if is_thinking_overflow else "empty_ollama_response")
 
     return response_text
 
@@ -696,6 +988,8 @@ def analyze_vision_images_with_ollama(
     retry_attempts: list[dict[str, Any]] | None = None,
     log_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    raise OllamaServiceError("vision_model_disabled")
+
     if not images:
         raise OllamaServiceError("No rendered document images were provided")
 
@@ -713,17 +1007,18 @@ def analyze_vision_images_with_ollama(
         attempt_label = str(attempt.get("label") or "retry")
         attempt_prompt = str(attempt.get("prompt") or prompt)
         attempt_images = attempt.get("images") or images
+        attempt_context = {**(log_context or {}), **(attempt.get("context") or {})}
         try:
             response_text = _request_vision_generate(
                 attempt_prompt,
                 attempt_images,
                 attempt_label,
                 attempt_number,
-                log_context,
+                attempt_context,
             )
         except OllamaServiceError as exc:
             last_error = exc
-            if str(exc) == "empty_ollama_response":
+            if str(exc) in ("empty_ollama_response", "thinking_overflow"):
                 continue
             raise
 

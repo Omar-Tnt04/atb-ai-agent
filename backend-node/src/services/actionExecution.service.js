@@ -2,6 +2,7 @@ const { getActionByName } = require('../actions/actionRegistry');
 const {
   executeConnectorOperation,
 } = require('../connectors/connectorRegistry');
+const env = require('../config/env');
 const mockAccounts = require('../data/mockAccounts');
 const mockBeneficiaries = require('../data/mockBeneficiaries');
 const mockBills = require('../data/mockBills');
@@ -32,6 +33,9 @@ const BILL_PAYMENT_FEES = 0;
 const TRANSFER_FEES = 1;
 const paymentReferences = [];
 const transferReferences = [];
+const cardReferences = [];
+const complaintSimulationReferences = [];
+const appointmentSimulationReferences = [];
 
 const hasValue = (value) =>
   value !== undefined &&
@@ -87,6 +91,95 @@ const createTransferReference = () => {
   transferReferences.push(reference);
 
   return reference;
+};
+
+const createSimulationReference = (prefix, store) => {
+  const year = new Date().getFullYear();
+  const sequence = String(store.length + 1).padStart(6, '0');
+  const reference = `${prefix}-${year}-${sequence}`;
+
+  store.push(reference);
+
+  return reference;
+};
+
+// 2b — display-only DEMO reference + simulated-success wording.
+// The INTERNAL references (paymentReference / transferReference / ...) are never changed; they stay
+// in `data` for logs and existing tests. We only ADD `data.demoReference` and `body.assistantMessage`
+// for the user-facing simulated-success message. Read-only actions (balance, etc.) are unaffected.
+const SIMULATED_WRITE_ACTIONS = new Set([
+  'pay_bill',
+  'make_transfer',
+  'create_complaint',
+  'book_appointment',
+  'generate_document',
+]);
+
+const internalReferenceFromResult = (data = {}) =>
+  data.paymentReference ||
+  data.transferReference ||
+  data.cardReference ||
+  data.reference ||
+  data.complaint?.reference ||
+  data.appointment?.appointmentId ||
+  data.document?.documentId ||
+  null;
+
+const toDemoReference = (internalReference) => {
+  const ref = String(internalReference || '').trim();
+  return ref ? `DEMO-${ref}` : null;
+};
+
+const buildSimulatedActionMessage = ({ actionName, data = {}, demoReference }) => {
+  const actionLabel = {
+    pay_bill: 'payment',
+    make_transfer: 'transfer',
+    request_card: 'card request',
+    create_complaint: 'complaint',
+    book_appointment: 'appointment',
+    generate_document: 'document request',
+  }[actionName] || 'action';
+  const realWord =
+    actionName === 'make_transfer' ? 'transfer'
+      : actionName === 'pay_bill' ? 'payment'
+      : 'action';
+
+  return [
+    `Done — I simulated the ${actionLabel}.`,
+    `This is an MVP demo, so no real ${realWord} was made.`,
+    demoReference ? `Demo reference: ${demoReference}.` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  const value = (input) =>
+    input === undefined || input === null || String(input).trim() === '' ? null : String(input).trim();
+  const amount = value(data.amount);
+  const currency = value(data.currency) || 'TND';
+  const provider = value(data.provider);
+  const beneficiary = value(data.beneficiaryName);
+  const money = amount ? ` of **${amount} ${currency}**` : '';
+
+  const lead = {
+    pay_bill: `Done — I simulated the **${provider || 'bill'}** payment${money}.`,
+    make_transfer: `Done — I simulated the transfer${money}${beneficiary ? ` to **${beneficiary}**` : ''}.`,
+    create_complaint: 'Done — I simulated submitting your complaint.',
+    book_appointment: 'Done — I simulated booking your appointment.',
+    generate_document: 'Done — I simulated generating your document.',
+  }[actionName] || 'Done — I simulated this action.';
+
+  const legacyRealWord =
+    actionName === 'make_transfer' ? 'transfer'
+      : actionName === 'pay_bill' ? 'payment'
+      : 'banking operation';
+
+  return [
+    lead,
+    `This is an MVP demo, so **no real ${legacyRealWord} was made**.`,
+    demoReference ? `Demo reference: **${demoReference}**.` : null,
+  ]
+    .filter(Boolean)
+    .join(' ');
 };
 
 const getBillPaymentContext = ({ user, payload }) => {
@@ -210,6 +303,280 @@ const getTransferContext = ({ user, payload }) => {
     amount,
     beneficiary,
     sourceAccount,
+  };
+};
+
+const getPreparedBillPaymentData = (payload = {}) => ({
+  provider: payload._preparedBill?.provider || payload.provider,
+  billReference: payload._preparedBill?.billReference || payload.billReference,
+  amount: payload._preparedBill?.amount ?? payload.amount,
+  currency: payload._preparedBill?.currency || payload.currency || 'TND',
+  status: payload._preparedBill?.status || payload.status || 'unpaid',
+});
+
+const MVP_LOCAL_SIMULATION_ACTIONS = new Set([
+  'pay_bill',
+  'make_transfer',
+  'request_card',
+  'create_complaint',
+  'book_appointment',
+]);
+
+const canUseMvpLocalSimulation = (actionName) =>
+  env.mvpLocalActionSimulation && MVP_LOCAL_SIMULATION_ACTIONS.has(actionName);
+
+const buildLocalSimulationResult = ({ actionName, payload = {}, user }) => {
+  switch (actionName) {
+    case 'pay_bill': {
+      const preparedBill = getPreparedBillPaymentData(payload);
+
+      if (preparedBill.status === 'paid') {
+        return {
+          success: false,
+          status: 'already_paid',
+          message: 'Bill is already paid',
+        };
+      }
+
+      const sourceAccount = getClientAccount(user, payload.sourceAccountId);
+
+      if (!sourceAccount) {
+        return {
+          success: false,
+          status: 'not_found',
+          message: 'Source account not found',
+        };
+      }
+
+      if (
+        !hasValue(preparedBill.provider) ||
+        !hasValue(preparedBill.billReference) ||
+        !hasValue(preparedBill.amount)
+      ) {
+        return {
+          success: false,
+          status: 'missing_fields',
+          message: 'Prepared bill payment details are incomplete',
+        };
+      }
+
+      const amount = Number(preparedBill.amount);
+
+      if (!Number.isFinite(amount) || amount <= 0) {
+        return {
+          success: false,
+          status: 'invalid_amount',
+          message: 'Bill amount must be a positive number',
+        };
+      }
+
+      const totalAmount = Number((amount + BILL_PAYMENT_FEES).toFixed(3));
+
+      if (sourceAccount.balance < totalAmount) {
+        return {
+          success: false,
+          status: 'insufficient_balance',
+          message: 'Insufficient account balance',
+        };
+      }
+
+      return {
+        success: true,
+        source: 'local_mvp_simulation',
+        serviceName: 'local_mvp_simulation',
+        data: {
+          paymentReference: createPaymentReference(),
+          provider: preparedBill.provider,
+          billReference: preparedBill.billReference,
+          amount,
+          currency: preparedBill.currency,
+          sourceAccount: maskAccountNumber(sourceAccount.accountNumber),
+          status: 'simulated',
+          localSimulation: true,
+        },
+      };
+    }
+
+    case 'make_transfer': {
+      const context = getTransferContext({ user, payload });
+
+      if (!context.success) return context;
+
+      const totalAmount = Number((context.amount + TRANSFER_FEES).toFixed(3));
+
+      if (context.sourceAccount.balance < totalAmount) {
+        return {
+          success: false,
+          status: 'insufficient_balance',
+          message: 'Insufficient account balance',
+        };
+      }
+
+      return {
+        success: true,
+        source: 'local_mvp_simulation',
+        serviceName: 'local_mvp_simulation',
+        data: {
+          transferReference: createTransferReference(),
+          amount: context.amount,
+          currency: context.sourceAccount.currency,
+          sourceAccount: maskAccountNumber(context.sourceAccount.accountNumber),
+          beneficiaryId: context.beneficiary.beneficiaryId,
+          beneficiaryName: context.beneficiary.name,
+          beneficiaryRib: maskRib(context.beneficiary.rib),
+          status: 'simulated',
+          localSimulation: true,
+        },
+      };
+    }
+
+    case 'request_card': {
+      const account = getClientAccount(user, payload.accountId);
+
+      if (!account) {
+        return {
+          success: false,
+          status: 'not_found',
+          message: 'Source account not found',
+        };
+      }
+
+      return {
+        success: true,
+        source: 'local_mvp_simulation',
+        serviceName: 'local_mvp_simulation',
+        data: {
+          cardReference: createSimulationReference('CARD', cardReferences),
+          cardType: payload.cardType,
+          sourceAccount: maskAccountNumber(account.accountNumber),
+          status: 'simulated',
+          localSimulation: true,
+        },
+      };
+    }
+
+    case 'create_complaint':
+      return {
+        success: true,
+        source: 'local_mvp_simulation',
+        serviceName: 'local_mvp_simulation',
+        data: {
+          complaint: {
+            reference: createSimulationReference('CMP', complaintSimulationReferences),
+            customerName: user.fullName,
+            category: payload.category,
+            description: payload.description,
+            status: 'simulated',
+          },
+          localSimulation: true,
+        },
+      };
+
+    case 'book_appointment':
+      return {
+        success: true,
+        source: 'local_mvp_simulation',
+        serviceName: 'local_mvp_simulation',
+        data: {
+          appointment: {
+            appointmentId: createSimulationReference('APT', appointmentSimulationReferences),
+            customerName: user.fullName,
+            branch: payload.branch,
+            date: payload.date,
+            time: payload.time,
+            status: 'simulated',
+          },
+          localSimulation: true,
+        },
+      };
+
+    default:
+      return {
+        success: false,
+        status: 'not_supported',
+        message: 'Local MVP simulation is not supported for this action',
+      };
+  }
+};
+
+const executeMvpLocalSimulation = ({
+  action,
+  actionName,
+  payload,
+  user,
+  confirmationId,
+  confirmationStatus,
+}) => {
+  const simulationResult = buildLocalSimulationResult({ actionName, payload, user });
+
+  if (!simulationResult.success) {
+    createExecutionLog({
+      user,
+      action,
+      actionName,
+      payload,
+      status: simulationResult.status,
+      failureReason: simulationResult.message,
+      confirmationId,
+      confirmationStatus,
+      connectorSource: 'local_mvp_simulation',
+      serviceName: 'local_mvp_simulation',
+    });
+
+    return {
+      httpStatus: simulationResult.status === 'not_found' ? 404 : 400,
+      body: {
+        success: false,
+        status: simulationResult.status,
+        message: simulationResult.message,
+      },
+    };
+  }
+
+  const resultData = simulationResult.data || {};
+  const internalReference = internalReferenceFromResult(resultData);
+  const demoReference = toDemoReference(internalReference);
+
+  console.info('[DEMO_ACTION] localSimulation=true', {
+    actionType: actionName,
+    internalReference,
+    displayReference: demoReference,
+  });
+
+  createExecutionLog({
+    user,
+    action,
+    actionName,
+    payload,
+    status: 'completed',
+    result: {
+      ...resultData,
+      demoReference,
+    },
+    confirmationId,
+    confirmationStatus,
+    connectorSource: 'local_mvp_simulation',
+    serviceName: 'local_mvp_simulation',
+  });
+
+  return {
+    httpStatus: 200,
+    body: {
+      success: true,
+      status: 'completed',
+      message: 'Action executed successfully',
+      executionMode: 'local_mvp_simulation',
+      assistantMessage: buildSimulatedActionMessage({
+        actionName,
+        data: resultData,
+        demoReference,
+      }),
+      data: {
+        ...resultData,
+        executionMode: 'local_mvp_simulation',
+        demoReference,
+      },
+    },
   };
 };
 
@@ -585,7 +952,7 @@ const validateActionRequest = ({ actionName, payload, user }) => {
     };
   }
 
-  if (action.status === 'not_connected') {
+  if (action.status === 'not_connected' && !canUseMvpLocalSimulation(action.name)) {
     return {
       action,
       httpStatus: 400,
@@ -687,18 +1054,42 @@ const executeValidatedAction = async ({
     serviceName: executionResult.serviceName,
   });
 
+  const resultData = executionResult.data || {};
+  const isSimulatedWrite = SIMULATED_WRITE_ACTIONS.has(actionName);
+  const demoReference = isSimulatedWrite
+    ? resultData.demoReference || toDemoReference(internalReferenceFromResult(resultData))
+    : null;
+
+  const body = {
+    success: true,
+    status: 'completed',
+    message: 'Action executed successfully',
+    executionMode,
+    data: {
+      ...resultData,
+      executionMode,
+      ...(demoReference ? { demoReference } : {}),
+    },
+  };
+  if (isSimulatedWrite) {
+    // User-facing simulated-success message (the internal reference above is left unchanged).
+    body.assistantMessage = buildSimulatedActionMessage({
+      actionName,
+      data: resultData,
+      demoReference,
+    });
+    if (['1', 'true', 'yes', 'on'].includes(String(process.env.DEBUG_AGENT_ROUTING).toLowerCase())) {
+      console.log(
+        `[DEMO_ACTION] simulated action=${actionName}` +
+        ` internalRef=${internalReferenceFromResult(resultData) || 'none'}` +
+        ` demoRef=${demoReference || 'none'} realExecution=false`,
+      );
+    }
+  }
+
   return {
     httpStatus: 200,
-    body: {
-      success: true,
-      status: 'completed',
-      message: 'Action executed successfully',
-      executionMode,
-      data: {
-        ...executionResult.data,
-        executionMode,
-      },
-    },
+    body,
   };
 };
 
@@ -898,6 +1289,17 @@ const confirmAction = async ({ confirmationId, user }) => {
   }
 
   markConfirmationAsConfirmed(confirmationId);
+
+  if (canUseMvpLocalSimulation(confirmation.actionName)) {
+    return executeMvpLocalSimulation({
+      action,
+      actionName: confirmation.actionName,
+      payload: confirmation.payload,
+      user,
+      confirmationId,
+      confirmationStatus: 'confirmed',
+    });
+  }
 
   if (confirmation.riskLevel === 'high') {
     if (!user.phoneNumber) {

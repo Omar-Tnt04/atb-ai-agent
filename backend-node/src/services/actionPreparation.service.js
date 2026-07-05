@@ -1,4 +1,5 @@
 const { getActionByName } = require('../actions/actionRegistry');
+const env = require('../config/env');
 const mockAccounts = require('../data/mockAccounts');
 const { maskAccountNumber } = require('../utils/mask');
 const { getMissingFields } = require('../utils/validation');
@@ -8,6 +9,9 @@ const { getMissingFields } = require('../utils/validation');
 // demo services are replaced by the real ATB internal APIs.
 const getExecutionMode = (action) => {
   if (!action || action.status !== 'connected') {
+    if (env.mvpLocalActionSimulation && action?.name === 'request_card') {
+      return 'local_mvp_simulation';
+    }
     return 'none';
   }
 
@@ -170,7 +174,7 @@ const prepareAction = ({ actionName, payload = {}, user }) => {
     };
   }
 
-  if (action.status === 'not_connected') {
+  if (action.status === 'not_connected' && !(env.mvpLocalActionSimulation && action.name === 'request_card')) {
     return {
       httpStatus: 400,
       body: {

@@ -51,8 +51,24 @@ const assertBackendEndpoint = (value) => {
   return parsed.href;
 };
 
-const getChatEndpoint = () =>
-  assertBackendEndpoint((import.meta.env || {}).VITE_AGENT_API_URL || DEFAULT_AGENT_API_URL);
+const getChatEndpoint = () => {
+  // 1. Build-time env var takes highest priority (set in .env for production builds).
+  const envUrl = (import.meta.env || {}).VITE_AGENT_API_URL;
+  if (envUrl) return assertBackendEndpoint(envUrl);
+  // 2. Runtime apiUrl query param — set by the extension/loader from widget-config.js.
+  //    Allows switching backend URLs (e.g. HTTPS tunnels) without rebuilding the widget.
+  try {
+    if (typeof window !== 'undefined') {
+      const paramBase = new URLSearchParams(window.location.search).get('apiUrl');
+      if (paramBase) {
+        const origin = new URL(paramBase).origin;
+        return assertBackendEndpoint(`${origin}/api/widget/chat`);
+      }
+    }
+  } catch { /* fall through */ }
+  // 3. Hardcoded default for local dev.
+  return assertBackendEndpoint(DEFAULT_AGENT_API_URL);
+};
 
 const getAuthToken = () => ((import.meta.env || {}).VITE_AGENT_AUTH_TOKEN || '').trim();
 
@@ -230,7 +246,7 @@ const looksLikePdf = (url = '', fileType = '') =>
   String(fileType).toLowerCase() === 'pdf' || /\.pdf(?:$|[?#])/i.test(url);
 
 const getQuickActionUrl = (action = {}) =>
-  action.url || action.downloadUrl || action.fileUrl || '';
+  action.url || action.viewUrl || action.downloadUrl || action.fileUrl || '';
 
 const isDownloadLikeQuickAction = (action = {}) => {
   const actionType = action.action || action.type || '';
@@ -331,12 +347,14 @@ const normalizeQuickAction = (action, index) => {
     return { label: action, action: 'prompt', prompt: action };
   }
 
-  const rawUrl = action.url || action.downloadUrl || action.fileUrl || null;
+  const rawUrl = action.url || action.viewUrl || action.downloadUrl || action.fileUrl || null;
   const safeUrl = rawUrl ? toAbsoluteBackendUrl(rawUrl) : null;
   const rawActionType = action.action || action.type || '';
-  const normalizedAction = rawActionType === 'download_pdf'
-    ? 'download'
-    : rawActionType || (safeUrl ? 'open_url' : 'prompt');
+  const normalizedAction = ['open', 'view_image'].includes(rawActionType)
+    ? 'open_url'
+    : rawActionType === 'download_pdf'
+      ? 'download'
+      : rawActionType || (safeUrl ? 'open_url' : 'prompt');
   const value = action.value || action.id || null;
   const label =
     action.label ||
@@ -514,6 +532,11 @@ export async function sendAgentMessage({
   agentContext = {},
   profileContext = {},
   payload = {},
+  pageSnapshot = null,
+  pageGoalState = null,
+  mode = 'ask',
+  cacheContext = null,
+  siteContext = null,
 }) {
   const data = await postJson(toAbsoluteBackendUrl(getChatEndpoint()), {
     message,
@@ -522,9 +545,284 @@ export async function sendAgentMessage({
     conversationHistory,
     profileContext,
     agentContext: agentContext || {},
+    pageSnapshot,
+    pageGoalState,
+    mode,
+    cacheContext,
+    siteContext,
   });
 
   return normalizeAgentResponse(data);
+}
+
+// Same-page control bridge (widget iframe ↔ host-page loader).
+// Ask the loader (which lives in the host page and can read its DOM) for a generic snapshot.
+// Resolves null when not embedded or when no loader answers in time → backend then uses its
+// browser-use fallback instead of same-page control.
+export function requestPageSnapshot({ timeoutMs = 800 } = {}) {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || window.parent === window) {
+      resolve(null);
+      return;
+    }
+
+    const requestId = `snap-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let settled = false;
+
+    const onMessage = (event) => {
+      const msg = event.data || {};
+      if (msg.type === 'ATB_PAGE_SNAPSHOT' && msg.requestId === requestId) {
+        settled = true;
+        window.removeEventListener('message', onMessage);
+        resolve(msg.snapshot || null);
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    window.parent.postMessage({ type: 'ATB_PAGE_INSPECT_REQUEST', requestId }, '*');
+
+    window.setTimeout(() => {
+      if (!settled) {
+        window.removeEventListener('message', onMessage);
+        resolve(null);
+      }
+    }, timeoutMs);
+  });
+}
+
+// Ask the host-page loader for a full structured site-context object extracted from the
+// current DOM. Used by Ask mode to enrich answers with page-specific content.
+// Resolves null when not embedded, no loader responds, or on timeout.
+export function requestSiteContext({ timeoutMs = 1200 } = {}) {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || window.parent === window) {
+      resolve(null);
+      return;
+    }
+
+    const requestId = `ctx-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let settled = false;
+
+    const onMessage = (event) => {
+      const msg = event.data || {};
+      if (msg.type === 'ATB_SITE_CONTEXT_RESPONSE' && msg.requestId === requestId) {
+        settled = true;
+        window.removeEventListener('message', onMessage);
+        resolve(msg.context || null);
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    window.parent.postMessage({ type: 'ATB_SITE_CONTEXT_REQUEST', requestId }, '*');
+
+    window.setTimeout(() => {
+      if (!settled) {
+        window.removeEventListener('message', onMessage);
+        resolve(null);
+      }
+    }, timeoutMs);
+  });
+}
+
+// Forward a backend-produced page action plan to the host-page loader for safe execution.
+// Resolves once the loader confirms it ran the actions (ATB_PAGE_ACTION_RESULT) or after a
+// timeout — so the widget can wait for the scroll/highlight to happen before showing its final
+// answer, and never blocks the UI if no loader answers.
+export function dispatchPageActions(actions, { timeoutMs = 1500 } = {}) {
+  return new Promise((resolve) => {
+    if (!Array.isArray(actions) || actions.length === 0) {
+      resolve({ ok: false, dispatched: false });
+      return;
+    }
+    if (typeof window === 'undefined' || window.parent === window) {
+      resolve({ ok: false, dispatched: false });
+      return;
+    }
+
+    const requestId = `act-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let settled = false;
+
+    const onMessage = (event) => {
+      const msg = event.data || {};
+      if (msg.type === 'ATB_PAGE_ACTION_RESULT' && msg.requestId === requestId) {
+        settled = true;
+        window.removeEventListener('message', onMessage);
+        resolve({ ok: !!(msg.result && msg.result.ok), dispatched: true, result: msg.result || null });
+      }
+    };
+
+    window.addEventListener('message', onMessage);
+    window.parent.postMessage({ type: 'ATB_PAGE_ACTION', actions, requestId }, '*');
+
+    window.setTimeout(() => {
+      if (!settled) {
+        window.removeEventListener('message', onMessage);
+        resolve({ ok: false, dispatched: true, result: null, timedOut: true });
+      }
+    }, timeoutMs);
+  });
+}
+
+// Resume breadcrumb: when a safe navigation reloads the host page (and the widget with it), we
+// stash the in-flight goal in sessionStorage so the widget can pick the goal back up on the new
+// page and point out the next relevant step. Short TTL — a stale breadcrumb is ignored.
+const PAGE_GOAL_RESUME_KEY = 'atb_widget_page_goal_resume';
+const PAGE_GOAL_RESUME_TTL_MS = 30_000;
+
+export function savePageGoalResume(data) {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(
+      PAGE_GOAL_RESUME_KEY,
+      JSON.stringify({ ...data, ts: Date.now() }),
+    );
+  } catch {
+    /* localStorage unavailable — resume simply won't happen. */
+  }
+}
+
+export function readPageGoalResume() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(PAGE_GOAL_RESUME_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed.ts || Date.now() - parsed.ts > PAGE_GOAL_RESUME_TTL_MS) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearPageGoalResume() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.removeItem(PAGE_GOAL_RESUME_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+// Tell the backend to launch a queued browser-use job. Called AFTER saveChatState so the widget
+// state is persisted before python runs and potentially navigates the host page. Idempotent.
+export async function triggerBrowserAgentJobStart(jobId) {
+  if (!jobId) return;
+  const base = isWidgetDemoEndpoint()
+    ? `${getBackendBaseUrl()}/api/widget/browser-agent`
+    : `${getBackendBaseUrl()}/agent/browser-agent`;
+  try {
+    await fetch(`${base}/${encodeURIComponent(jobId)}/start`, {
+      method: 'POST',
+      headers: jsonHeaders(),
+    });
+  } catch {
+    // Network error — polling will handle not_found/timeout.
+  }
+}
+
+// Poll a backend browser-use job until it finishes. Returns the raw job payload:
+//   { status: 'browser_agent_running' } | { status:'browser_agent_done', assistantMessage }
+//   | { status:'browser_agent_error', message } | { status:'not_found' }
+export async function fetchBrowserAgentJob(jobId) {
+  if (!jobId) {
+    return { status: 'not_found' };
+  }
+  const base = isWidgetDemoEndpoint()
+    ? `${getBackendBaseUrl()}/api/widget/browser-agent`
+    : `${getBackendBaseUrl()}/agent/browser-agent`;
+  const url = `${base}/${encodeURIComponent(jobId)}`;
+
+  try {
+    const response = await fetch(url, { headers: jsonHeaders() });
+    const data = await parseJson(response);
+    if (response.status === 404) {
+      return { status: 'not_found' };
+    }
+    return data || { status: 'browser_agent_running' };
+  } catch {
+    // Transient network/reload error — let the caller keep polling.
+    return { status: 'browser_agent_running' };
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Chat persistence across host-page navigation. The injected widget lives in an iframe; when the
+// host page navigates, the iframe is destroyed and recreated with empty React state. We stash the
+// conversation (messages, open state, pending browser-use job) in sessionStorage — same-origin,
+// per-tab — so the freshly-injected widget restores it instead of resetting.
+// ---------------------------------------------------------------------------------------------
+const CHAT_STATE_KEY = 'atb_widget_chat_state';
+const CHAT_STATE_TTL_MS = 60 * 60 * 1000;
+
+export function saveChatState(state) {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.setItem(
+      CHAT_STATE_KEY,
+      JSON.stringify({ ...state, ts: Date.now() }),
+    );
+    if (state.pendingBrowserJob) {
+      console.log('[ATB_WIDGET_APP] saveChatState: pending job saved, jobId=', state.pendingBrowserJob.jobId, 'isOpen=', state.isOpen);
+    }
+  } catch {
+    /* localStorage unavailable — persistence simply won't happen. */
+  }
+}
+
+export function readChatState() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return null;
+    const raw = window.localStorage.getItem(CHAT_STATE_KEY);
+    console.log('[ATB_WIDGET_APP] readChatState: localStorage key exists =', raw ? 'yes' : 'no');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (!parsed.ts || Date.now() - parsed.ts > CHAT_STATE_TTL_MS) {
+      console.log('[ATB_WIDGET_APP] readChatState: state expired or missing ts');
+      return null;
+    }
+    console.log('[ATB_WIDGET_APP] readChatState: pendingBrowserJob =', parsed.pendingBrowserJob ? JSON.stringify(parsed.pendingBrowserJob) : 'none', '| isOpen =', parsed.isOpen);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearChatState() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    window.localStorage.removeItem(CHAT_STATE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+// Removes all atb_widget_* localStorage keys from the iframe origin (localhost:5174).
+// Does NOT clear the atb.tn bridge key (lives in parent page localStorage).
+// Call from iframe DevTools console: __atbWidgetReset()
+// Or trigger via postMessage ATB_WIDGET_DEV_RESET from content.js.
+export function clearAllWidgetState() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    const storage = window.localStorage;
+    const removed = [];
+    for (let i = storage.length - 1; i >= 0; i--) {
+      const key = storage.key(i);
+      if (key && key.startsWith('atb_widget_')) {
+        storage.removeItem(key);
+        removed.push(key);
+      }
+    }
+    console.log('[ATB_WIDGET_APP] clearAllWidgetState: removed', removed.length, 'keys:', removed.join(', ') || '(none)');
+  } catch {
+    /* ignore */
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.__atbWidgetReset = clearAllWidgetState;
+  console.log('[ATB_WIDGET_APP] dev reset: call __atbWidgetReset() from iframe DevTools console, or __atbWidgetReset() from ATB page console (after content.js sets it up)');
 }
 
 export async function executePreparedAction(preparation) {

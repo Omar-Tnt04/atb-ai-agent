@@ -14,6 +14,25 @@ const TEXT_LENGTH_ONLY_KEY_PATTERN =
 
 const MAX_STRING_LENGTH = 160;
 const MAX_PREVIEW_LENGTH = 120;
+const COMPACT_METRIC_KEYS = new Set([
+  'requestId',
+  'threadId',
+  'routeType',
+  'requestKind',
+  'mode',
+  'endpoint',
+  'selectedModel',
+  'selected_model',
+  'model',
+  'latencyMs',
+  'fileType',
+  'mimeType',
+  'ocrTextLength',
+  'extractedFieldCount',
+  'errorCode',
+  'status',
+  'statusCode',
+]);
 
 const ensureLogDir = () => {
   if (!env.architectureLogsEnabled) return null;
@@ -112,6 +131,28 @@ const compactValue = (value) => {
   return String(value);
 };
 
+const compactArchitectureMetrics = (payload = {}) => {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {};
+
+  const compact = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (COMPACT_METRIC_KEYS.has(key) || /^(requestId|threadId|latencyMs|ocrTextLength|extractedFieldCount|errorCode)$/i.test(key)) {
+      compact[key] = maskLogPayload(value, key);
+    }
+  }
+
+  if (!compact.routeType && payload.event) compact.routeType = maskLogPayload(payload.event, 'routeType');
+  if (!compact.selectedModel && payload.selected_model) compact.selectedModel = maskLogPayload(payload.selected_model, 'selectedModel');
+  if (!compact.fileType && payload.mimeType) {
+    compact.fileType = String(payload.mimeType).startsWith('image/') ? 'image' : String(payload.mimeType).includes('pdf') ? 'pdf' : 'unknown';
+  }
+  if (!compact.errorCode && (payload.code || payload.errorCode || payload.errorName)) {
+    compact.errorCode = maskLogPayload(payload.code || payload.errorCode || payload.errorName, 'errorCode');
+  }
+
+  return compact;
+};
+
 const writeLine = (filePath, line) => {
   if (!filePath) return;
   fs.appendFile(filePath, `${line}\n`, (error) => {
@@ -124,7 +165,7 @@ const writeLine = (filePath, line) => {
 const logArchitecture = (stage, payload = {}, options = {}) => {
   if (!env.architectureLogsEnabled) return;
 
-  const masked = maskLogPayload(payload || {});
+  const masked = compactArchitectureMetrics(payload || {});
   const timestamp = new Date().toISOString();
   const requestId = masked.requestId || options.requestId || 'no-request-id';
   const message = options.message || masked.message || stage;

@@ -71,6 +71,35 @@ class ModelRoutingContext(BaseModel):
     visionUsed: bool | None = None
 
 
+class ThreadContext(BaseModel):
+    priorTurns: list[dict[str, Any]] = Field(default_factory=list)
+    lastIntent: str | None = None
+
+
+class RequestContext(BaseModel):
+    """Compact pre-classified context built by Node.js before the planner call."""
+    mode: str | None = None
+    intentClass: dict[str, Any] | None = None
+    conversationContext: dict[str, Any] | None = None
+    currentPage: dict[str, Any] | None = None
+    pageSignals: dict[str, Any] | None = None
+    retrievalHints: dict[str, Any] | None = None
+    safetyHints: dict[str, Any] | None = None
+
+
+class AgentPlan(BaseModel):
+    """Deterministic plan produced by Node.js agentPlanner before the Ollama call."""
+    understoodGoal: str | None = None
+    selectedRoute: str | None = None
+    executorType: str | None = None
+    steps: list[str] = Field(default_factory=list)
+    requiredEvidence: list[str] = Field(default_factory=list)
+    fallbackRoute: str | None = None
+    confidence: float = 0.0
+    allowed: bool = True
+    reason: str | None = None
+
+
 class AgentAnalyzeRequest(BaseModel):
     requestId: str | None = None
     threadId: str | None = None
@@ -83,6 +112,9 @@ class AgentAnalyzeRequest(BaseModel):
     profileContext: ProfileContext | None = None
     agentContext: AgentContext | None = None
     modelRouting: ModelRoutingContext | None = None
+    threadContext: ThreadContext | None = None
+    requestContext: RequestContext | None = None
+    agentPlan: AgentPlan | None = None
 
 
 class VisionDocumentAnalyzeRequest(BaseModel):
@@ -94,6 +126,7 @@ class VisionDocumentAnalyzeRequest(BaseModel):
     profileContext: ProfileContext | None = None
     agentContext: AgentContext | None = None
     source: str = "backend_pdf"
+    goal: str | None = None
     fileName: str | None = None
     mimeType: str | None = "application/pdf"
     pdfBase64: str
@@ -116,6 +149,7 @@ class AgentAnalyzeData(BaseModel):
     confidence: float
     warnings: list[str] = Field(default_factory=list)
     markdown: str | None = None
+    visibleTextSummary: str | None = None
     missingFields: list[str] = Field(default_factory=list)
     extractedFields: dict[str, Any] = Field(default_factory=dict)
     requiredTool: str = "none"
@@ -145,17 +179,93 @@ class AgentDecisionResponse(BaseModel):
 
 
 class IntentPlannerData(BaseModel):
-    mode: str
-    needsResourceSearch: bool = False
-    resourceSearchQuery: str | None = None
-    needsActionFlow: bool = False
-    needsDownload: bool = False
-    actionType: str | None = None
+    intentType: str
     userGoal: str | None = None
+    resourceNeed: bool = False
+    resourceQuery: str | None = None
+    resourceCategoryHint: str | None = None
+    actionType: str = "none"
+    needsVision: bool = False
+    needsDownload: bool = False
+    missingFields: list[str] = Field(default_factory=list)
     confidence: float = 0.0
-    reason: str | None = None
 
 
 class IntentPlannerResponse(BaseModel):
     success: bool
     data: IntentPlannerData
+
+
+class ResourceRerankCandidate(BaseModel):
+    id: str
+    title: str
+    category: str | None = None
+    description: str | None = None
+    exampleQueries: list[str] = Field(default_factory=list)
+    intents: list[str] = Field(default_factory=list)
+    relatedActions: list[str] = Field(default_factory=list)
+
+
+class ResourceRerankRequest(BaseModel):
+    requestId: str | None = None
+    threadId: str | None = None
+    message: str
+    candidates: list[ResourceRerankCandidate]
+    modelRouting: ModelRoutingContext | None = None
+
+
+class ResourceRerankData(BaseModel):
+    chosenId: str
+    reason: str | None = None
+    confidence: float = 0.0
+
+
+class ResourceRerankResponse(BaseModel):
+    success: bool
+    data: ResourceRerankData
+
+
+class DescriptionQACandidate(BaseModel):
+    id: str
+    title: str
+    description: str | None = None
+
+
+class DescriptionQARequest(BaseModel):
+    requestId: str | None = None
+    threadId: str | None = None
+    message: str
+    candidates: list[DescriptionQACandidate]
+    modelRouting: ModelRoutingContext | None = None
+
+
+class DescriptionQAData(BaseModel):
+    selectedResourceId: str | None = None
+    confidence: float = 0.0
+    answerableFromDescription: bool = False
+    answerMarkdown: str | None = None
+    usedFacts: list[str] = Field(default_factory=list)
+    needsTrustedFileFetch: bool = True
+
+
+class DescriptionQAResponse(BaseModel):
+    success: bool
+    data: DescriptionQAData
+
+
+class ReformulateAnswerRequest(BaseModel):
+    requestId: str | None = None
+    threadId: str | None = None
+    userQuestion: str
+    selectedResourceId: str | None = None
+    extractedFacts: dict[str, Any] = Field(default_factory=dict)
+    modelRouting: ModelRoutingContext | None = None
+
+
+class ReformulateAnswerData(BaseModel):
+    answerMarkdown: str | None = None
+
+
+class ReformulateAnswerResponse(BaseModel):
+    success: bool
+    data: ReformulateAnswerData

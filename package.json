@@ -7,9 +7,11 @@
     "doc": "docs"
   },
   "scripts": {
-    "dev": "node scripts/dev/start.js",
+    "dev": "node scripts/dev/start-hosted.js",
+    "dev:full": "node scripts/dev/start.js",
     "dev:verbose": "concurrently --kill-others-on-fail --prefix \"[{name}]\" --names \"api,ai,web,widget,pay,doc,atb,apt,acc\" --prefix-colors \"blue,magenta,green,red,cyan,yellow,red,gray,white\" \"npm run dev:backend\" \"npm run dev:ai\" \"npm run dev:web\" \"npm run dev:widget\" \"npm run dev:pay\" \"npm run dev:doc\" \"npm run dev:atb\" \"npm run dev:apt\" \"npm run dev:acc\"",
     "dev:combined": "concurrently --kill-others-on-fail --prefix \"[{name}]\" --names \"api,ai,web,widget,pay,doc,atb,apt,acc\" --prefix-colors \"blue,magenta,green,red,cyan,yellow,red,gray,white\" \"npm run dev:backend\" \"npm run dev:ai\" \"npm run dev:web\" \"npm run dev:widget\" \"npm run dev:pay\" \"npm run dev:doc\" \"npm run dev:atb\" \"npm run dev:apt\" \"npm run dev:acc\"",
+    "dev:tunnels": "powershell -ExecutionPolicy Bypass -File scripts/dev/start-widget-tunnels.ps1",
     "dev:separate": "powershell -ExecutionPolicy Bypass -File scripts/start-dev.ps1",
     "dev:backend": "cd backend-node && npm run dev",
     "dev:ai": "node scripts/dev/ai.js",
@@ -23,7 +25,23 @@
     "logs": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$files=@('logs/agent.log','logs/architecture.log') | Where-Object { Test-Path $_ }; if ($files.Count) { Get-Content $files -Wait } else { Write-Host 'No logs found yet. Send a chat request first.' }\"",
     "logs:errors": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"if (Test-Path logs/errors.log) { Get-Content logs/errors.log -Wait } else { Write-Host 'logs/errors.log does not exist yet.' }\"",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "test:agent-router": "npm --prefix backend-node run test:agent-router"
+    "test:agent-router": "npm --prefix backend-node run test:agent-router",
+    "task": "node scripts/run-widget-task.js",
+    "task:ask": "node scripts/run-widget-task.js --mode ask",
+    "task:act": "node scripts/run-widget-task.js --mode act",
+    "task:catalog": "node scripts/run-widget-task.js --file scripts/catalog-ask-tests.json",
+    "task:all": "node scripts/run-all-tests.js",
+    "test:all:once": "node scripts/validate-site-index.js site-context/atb.tn/site-index.json && npm --prefix backend-node run test:all:once",
+    "site:index": "node scripts/build-site-index.js",
+    "site:index:atb": "node scripts/build-site-index.js https://atb.tn",
+    "site:index:full:atb": "cross-env SITE_MAX_PAGES=0 node scripts/build-site-index.js https://atb.tn",
+    "site:index:clear": "node -e \"const p=require('path'),f=require('fs'),d=p.join(__dirname,'site-context');f.existsSync(d)?f.rmSync(d,{recursive:true,force:true}):null;console.log('cleared site-context/')\"",
+    "site:index:enrich": "node scripts/enrich-site-index.js site-context/atb.tn/site-index.json",
+    "site:index:validate": "node scripts/validate-site-index.js site-context/atb.tn/site-index.json",
+    "site:context": "node scripts/build-site-context.js",
+    "site:context:atb": "node scripts/build-site-context.js --url https://atb.tn --out site-context/atb.tn/context.json",
+    "site:context:validate": "node scripts/validate-site-context.js site-context/atb.tn/context.json",
+    "test:site-context": "node scripts/tests/site-context.test.js"
   },
   "repository": {
     "type": "git",
@@ -38,6 +56,11 @@
   },
   "homepage": "https://github.com/Omar-Tnt04/atb-ai-agent#readme",
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "playwright": "^1.58.2"
+  },
+  "dependencies": {
+    "crawlee": "^3.17.0"
   }
 }

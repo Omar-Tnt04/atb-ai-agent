@@ -114,8 +114,7 @@ const extractExplicitPage = (message = '') => {
 const hasMemoryResource = (memoryContext = {}) =>
   Boolean(memoryContext?.lastActiveResource?.title || memoryContext?.lastActiveResource?.resourceId);
 
-const hasMemoryVision = (memoryContext = {}) =>
-  Boolean(memoryContext?.lastVisionResult?.documentSummary || memoryContext?.lastVisionResult?.evidence?.length);
+const hasMemoryVision = () => false;
 
 const memoryResourceText = (memoryContext = {}) =>
   normalizeText([
@@ -141,7 +140,8 @@ const isUnsafeRequest = (message = '') => {
     /\b(bypass|disable|override)\s+(security|safety|verification|sms|confirmation|auth|authentication|authorization)\b/.test(text) ||
     /\b(show|reveal|give|access|fetch|view)\b.{0,60}\b(another|other|someone else|different)\s+user/.test(text) ||
     /\b(another|other|someone else|different)\s+user\b.{0,60}\b(balance|account|rib|card|password|token|secret)\b/.test(text) ||
-    /\b(show|reveal|give)\b.{0,40}\b(password|token|secret|sms code|otp)\b/.test(text)
+    /\b(show|reveal|give)\b.{0,40}\b(password|token|secret|sms code|otp)\b/.test(text) ||
+    /\b(login\s+and|make\s+a?\s+transfer|virement|withdraw\s+\d|transfer\s+\d)\b/i.test(text)
   );
 };
 
@@ -153,6 +153,75 @@ const isDownloadRequest = (message = '') => {
   );
 };
 
+const isExplicitActionPreparationRequest = (message = '') => {
+  const text = normalizeText(message);
+
+  return (
+    /\btransfer\b.{0,80}\b\d/.test(text) ||
+    /\bsend\b.{0,80}\b\d/.test(text) ||
+    /\bpay\b.{0,60}\b(bill|invoice|steg|sonede|telecom|ooredoo|orange)\b/.test(text) ||
+    /\b(book|schedule|reserve)\b.{0,50}\b(appointment|meeting|visit)\b/.test(text) ||
+    /\b(create|submit|open|file)\b.{0,50}\b(complaint|claim|dispute)\b/.test(text) ||
+    /\b(generate|create)\b.{0,40}\b(statement|certificate|document)\b/.test(text)
+  );
+};
+
+const isLiveAccountServiceRequest = (message = '') => {
+  const text = normalizeText(message);
+  if (/\b(limit|notice|receipt|document|certificate|card|payment due|minimum payment|request|appointment|dispute)\b/.test(text)) {
+    return false;
+  }
+
+  return (
+    /\b(show|check|get|view)\b.{0,40}\b(my\s+)?balance\b/.test(text) ||
+    /\bwhat\s+(?:is|are)\s+(?:my\s+)?accounts?\s+balance\b/.test(text) ||
+    /\bhow\s+much\s+(?:money\s+)?(?:is\s+)?(?:in\s+)?(?:my\s+)?(?:current|savings|checking|account)\b/.test(text) ||
+    /\baccounts?\b.*\b(details?|information|info|summary|status)\b/.test(text) ||
+    /\b(details?|information|info|summary|status)\b.*\baccounts?\b/.test(text) ||
+    /\b(show|view|give|get|display|list)\b.*\bmy\s+(current|savings|checking|main|primary)?\s*accounts?\b/.test(text)
+  );
+};
+
+const COMPLAINT_REFERENCE_PATTERN = /\bcmp[-\s]?[a-z0-9-]*\d[a-z0-9-]*\b/i;
+
+const isComplaintStatusEligible = (message = '') => {
+  const text = normalizeText(message);
+  if (!text) return false;
+
+  return (
+    COMPLAINT_REFERENCE_PATTERN.test(String(message || '')) ||
+    /\bcomplaints?\b/.test(text) ||
+    /\bclaims?\b/.test(text) ||
+    /\breclamations?\b/.test(text) ||
+    /\bcomplaint\s+(reference|ref|id|number|status)\b/.test(text) ||
+    /\b(reference|ref|id|number|status)\b.{0,40}\bcomplaints?\b/.test(text) ||
+    /\bdispute\s+complaint\b|\bcomplaint\s+dispute\b/.test(text)
+  );
+};
+
+const hasResourceObjectDetected = (message = '') => {
+  const text = normalizeText(message);
+  if (!text) return false;
+
+  return (
+    /\bcheckbook\b|\bchequebook\b/.test(text) ||
+    /\bcard\s+pickup\b|\bpick\s+up\s+(?:my\s+)?(?:new\s+)?card\b/.test(text) ||
+    /\bappointments?\b/.test(text) ||
+    /\bbills?\b|\binvoices?\b/.test(text) ||
+    /\breceipts?\b/.test(text) ||
+    /\btransfers?\b/.test(text) ||
+    /\bbeneficiar(?:y|ies)\b/.test(text) ||
+    /\binsurance\b|\bpolic(?:y|ies)\b/.test(text) ||
+    /\btax\s+forms?\b/.test(text) ||
+    /\bsalary\s+certificates?\b/.test(text) ||
+    /\bstanding\s+orders?\b/.test(text) ||
+    /\baccount\s+closure\b/.test(text) ||
+    /\bexchange\s+receipts?\b|\bforeign\s+currency\b|\bfx\s+receipts?\b/.test(text) ||
+    /\bdisputes?\b/.test(text) ||
+    /\bsecurity\s+notices?\b/.test(text)
+  );
+};
+
 const isBankingActionRequest = (message = '') => {
   const text = normalizeText(message);
 
@@ -161,14 +230,27 @@ const isBankingActionRequest = (message = '') => {
     return false;
   }
 
+  return isExplicitActionPreparationRequest(message) || isLiveAccountServiceRequest(message);
+};
+
+const isCardResourceQuestion = (message = '') => {
+  const text = normalizeText(message);
+  if (!text) return false;
+
+  const aliasMatch = matchResourceAlias(message);
+  if (aliasMatch?.title === 'Credit Card Limit Notice' && aliasMatch.score >= 60) {
+    return true;
+  }
+
   return (
-    /\btransfer\b.{0,80}\b\d/.test(text) ||
-    /\bsend\b.{0,80}\b\d/.test(text) ||
-    /\bpay\b.{0,60}\b(bill|invoice|steg|sonede|telecom|ooredoo|orange)\b/.test(text) ||
-    /\b(book|schedule|reserve)\b.{0,50}\b(appointment|meeting|visit)\b/.test(text) ||
-    /\b(create|submit|open|file)\b.{0,50}\b(complaint|claim|dispute)\b/.test(text) ||
-    /\b(show|check|get|view)\b.{0,40}\b(my\s+)?balance\b/.test(text) ||
-    /\b(generate|create)\b.{0,40}\b(statement|certificate|document)\b/.test(text)
+    /\b(?:credit\s+card|card)\b.{0,50}\b(?:current\s+)?limit\b/.test(text) ||
+    /\b(?:current\s+|available\s+)?limit\b.{0,50}\b(?:credit\s+card|card)\b/.test(text) ||
+    /\bavailable\s+(?:card\s+)?limit\b/.test(text) ||
+    /\b(?:credit\s+card|card)\b.{0,50}\bpayment\s+due(?:\s+date)?\b/.test(text) ||
+    /\bpayment\s+due(?:\s+date)?\b.{0,50}\b(?:credit\s+card|card)\b/.test(text) ||
+    /\b(?:credit\s+card|card)\b.{0,50}\bminimum\s+payment\b/.test(text) ||
+    /\bminimum\s+payment\b.{0,50}\b(?:credit\s+card|card)\b/.test(text) ||
+    /\bcard\s+notice\b/.test(text)
   );
 };
 
@@ -191,12 +273,67 @@ const RESOURCE_TOPIC_PATTERNS = [
   /\bfees?\b/,
   /\bstatement\b/,
   /\bcertificate\b/,
+  /\bdirect\s+debit\b/,
+  /\bmandate\b/,
+  /\bgymplus\b/,
   /\binsurance\b/,
   /\btax\b/,
+  /\bnotice\b/,
+  /\breceipt\b/,
+  /\brequest\s+status\b/,
+  /\bsecurity\s+recommendation\b/,
+  /\bsecurity\s+notice\b/,
+  /\botp\s+(?:lock|locked|error)\b/,
+  /\blogin\s+error\b/,
+  /\batb\s+connect\s+otp\b/,
+  /\bcard\s+activation\b/,
+  /\bdebit\s+card\s+activation\b/,
 ];
+
+const isSmeAccountOpeningChecklistQuestion = (message = '') => {
+  const text = normalizeText(message);
+  if (!text) return false;
+
+  const asksDocuments =
+    /\bdocuments?\s+(?:are\s+)?required\b/.test(text) ||
+    /\brequired\s+documents?\b/.test(text) ||
+    /\bdocuments?\b.{0,50}\b(?:need|needed|required|necessary|must)\b/.test(text) ||
+    /\b(?:need|needed|required|necessary|must)\b.{0,50}\bdocuments?\b/.test(text) ||
+    /\bchecklist\b/.test(text);
+  const isOpeningContext =
+    /\bopen(?:ing)?\b.{0,40}\b(?:sme|business|small business)\s+account\b/.test(text) ||
+    /\b(?:sme|business|small business)\s+account\b.{0,40}\bopen(?:ing)?\b/.test(text) ||
+    /\baccount\s+opening\b/.test(text);
+  const namesChecklistField =
+    /\b(business\s+registration|tax\s+id\s+certificate|owner\s+cin|proof\s+of\s+address)\b/.test(text);
+
+  return namesChecklistField || (asksDocuments && isOpeningContext);
+};
 
 const inferResourceHint = (message = '', memoryContext = {}) => {
   const text = normalizeText(message);
+  if (isSmeAccountOpeningChecklistQuestion(message)) {
+    return 'SME Account Opening Checklist';
+  }
+  if (
+    /\b(checkbook|chequebook)\b/.test(text) &&
+    /\b(when|ready|available|pick\s+up|pickup|collect|status|preparation|prepared)\b/.test(text)
+  ) {
+    return 'checkbook ready date';
+  }
+  if (
+    /\bcard\b/.test(text) &&
+    /\b(pick\s+up|pickup|appointment|collect)\b/.test(text)
+  ) {
+    return 'card pickup appointment';
+  }
+  if (
+    /\batb\s+connect\b/.test(text) &&
+    /\b(otp|login|locked|lock|error)\b/.test(text)
+  ) {
+    return message;
+  }
+
   const aliasMatch = matchResourceAlias(message);
 
   if (aliasMatch?.title) {
@@ -214,6 +351,11 @@ const inferResourceHint = (message = '', memoryContext = {}) => {
   for (const pattern of RESOURCE_TOPIC_PATTERNS) {
     const match = text.match(pattern);
     if (match?.[0]) return match[0].trim();
+  }
+
+  const namedEntityMatch = text.match(/^who\s+is\s+(?!the\b|a\b|an\b|atb\b|bank\b)([a-z][a-z0-9]{2,}(?:\s+[a-z][a-z0-9]{2,}){0,2})\??$/);
+  if (namedEntityMatch?.[1]) {
+    return namedEntityMatch[1].trim();
   }
 
   if (hasMemoryResource(memoryContext)) {
@@ -296,12 +438,68 @@ const isGeneralNaturalQuestion = (message = '') => {
   );
 };
 
+const isGenericResourceQuestion = (message = '', resourceHint = null) => {
+  const text = normalizeText(message);
+  if (!text || isCapabilitiesQuestion(message)) return false;
+
+  const hasResourceNoun =
+    /\b(document|notice|receipt|certificate|request|request\s+status|status|pdf|file|form|statement|policy|resource|image|photo|picture)\b/.test(text);
+  const hasResourceTopic =
+    /\b(limit|fees?|payment|transfer|dispute|appointment|security|recommendation|recommended|recommend|activation|otp|login|locked|lock|error|mandate|debit)\b/.test(text);
+  const hasResourceCommand =
+    /\b(show|shown|get|find|open|summarize|summary|view|display|fetch|download)\b/.test(text);
+  const asksOwnThing = /\bwhat\s+(?:is|are)\s+my\b/.test(text);
+  const asksRecommendation = /\bwhat\s+does\b.{0,80}\brecommend\b/.test(text);
+  const asksRequestStatus =
+    /\bstatus\b.{0,60}\b(request|complaint|dispute|replacement|checkbook|chequebook|appointment|transfer)\b/.test(text) ||
+    /\b(request|complaint|dispute|replacement|checkbook|chequebook|appointment|transfer)\b.{0,60}\bstatus\b/.test(text);
+  const asksResourceLifecycle =
+    hasResourceObjectDetected(text) &&
+    /\b(when|status|ready|pick\s+up|pickup|available|confirmed|pending|in\s+preparation|preparation|collect)\b/.test(text);
+
+  if (hasResourceCommand && (hasResourceNoun || resourceHint)) return true;
+  if (asksRequestStatus) return true;
+  if (asksResourceLifecycle) return true;
+  if (asksRecommendation && (hasResourceNoun || hasResourceTopic || resourceHint)) return true;
+  if (asksOwnThing && (hasResourceNoun || hasResourceTopic || resourceHint)) return true;
+  if (resourceHint && hasDetailQuestion(message) && hasResourceTopic) return true;
+
+  return false;
+};
+
 const isAliasMetadataRequest = (message = '') => {
   const text = normalizeText(message);
   if (!matchResourceAlias(message)) return false;
 
   return /\b(show|open|display|get|find|do you have|information about|info about|tell me about)\b/.test(text);
 };
+
+const isAliasNaturalResourceQuestion = (message = '') => {
+  const text = normalizeText(message);
+  if (!matchResourceAlias(message) || !hasDetailQuestion(message)) return false;
+  if (/\b(documents?|papers?|requirements?|required)\b/.test(text) && /\bloans?\b/.test(text)) {
+    return false;
+  }
+  if (/\bshould\s+i\b/.test(text) || /\blost\s+(?:my\s+)?card\b|\bcard\b.*\blost\b/.test(text)) {
+    return false;
+  }
+
+  return /^(who|what|why|when|where|is|are|do|does|explain|describe|tell\s+me)\b/.test(text);
+};
+
+const isNamedEntityResourceQuestion = (message = '') => {
+  const text = normalizeText(message);
+  return /^who\s+is\s+(?!the\b|a\b|an\b|atb\b|bank\b)[a-z][a-z0-9]{2,}(?:\s+[a-z][a-z0-9]{2,}){0,2}\??$/.test(text);
+};
+
+const isResourceFirstQuestion = (message = '', resourceHint = null) => (
+  isCardResourceQuestion(message) ||
+  isDownloadRequest(message) ||
+  (resourceHint && isAliasMetadataRequest(message)) ||
+  (resourceHint && isAliasNaturalResourceQuestion(message)) ||
+  (resourceHint && isNamedEntityResourceQuestion(message)) ||
+  isGenericResourceQuestion(message, resourceHint)
+);
 
 const isMemoryContinue = (message = '', memoryContext = {}) => {
   const text = normalizeText(message);
@@ -382,8 +580,36 @@ const REQUESTED_FIELD_PATTERNS = [
   { field: 'estimatedRate', label: 'estimated rate', patterns: [/\bestimated\s+rate\b/] },
   { field: 'status', label: 'status', patterns: [/\bpre\s+eligible\b/, /\bpreeligible\b/, /\bstatus\b/, /\bpaid\b/, /\bunpaid\b/] },
   { field: 'amount', label: 'amount', patterns: [/\bamount\b/] },
+  { field: 'feeAmount', label: 'fee amount', patterns: [/\bfee\s+amount\b/, /\bfee\b.{0,30}\bamount\b/] },
+  { field: 'scheduledDate', label: 'billing date', patterns: [/\bbilling\s+date\b/, /\bscheduled\s+date\b/] },
   { field: 'dueDate', label: 'due date', patterns: [/\bdue\s+date\b/] },
   { field: 'billReference', label: 'bill reference', patterns: [/\bbill\s+reference\b/, /\breference\b/] },
+  { field: 'merchant', label: 'merchant', patterns: [/\bmerchant\b/] },
+  { field: 'provider', label: 'provider', patterns: [/\bprovider\b/] },
+  { field: 'accountId', label: 'account ID', patterns: [/\baccount\s+(?:id|number)\b/] },
+  { field: 'sourceAccount', label: 'source account', patterns: [/\bsource\s+account\b/] },
+  { field: 'holderName', label: 'holder name', patterns: [/\bholder\s+name\b/, /\bcustomer\s+name\b/] },
+  { field: 'iban', label: 'IBAN', patterns: [/\biban\b/] },
+  { field: 'rib', label: 'RIB', patterns: [/\brib\b/] },
+  { field: 'receiptId', label: 'receipt ID', patterns: [/\breceipt\s+(?:id|number)\b/] },
+  { field: 'ticketId', label: 'ticket ID', patterns: [/\bticket\s+id\b/] },
+  { field: 'queueNumber', label: 'queue number', patterns: [/\bqueue\s+(?:number|num)\b/, /\bticket\s+(?:number|num)\b/, /\bmy\s+(?:queue\s+)?number\b/] },
+  { field: 'estimatedWait', label: 'estimated wait', patterns: [/\bestimated\s+wait\b/, /\bwait\s+time\b/, /\bhow\s+long\b/] },
+  { field: 'service', label: 'service', patterns: [/\bservice\b/] },
+  { field: 'servicePoint', label: 'service point', patterns: [/\bservice\s+point\b/, /\bwindow\b/] },
+  { field: 'targetAmount', label: 'target amount', patterns: [/\btarget\s+amount\b/] },
+  { field: 'savedAmount', label: 'saved amount', patterns: [/\bsaved\s+amount\b/] },
+  { field: 'progressPercentage', label: 'progress', patterns: [/\bprogress\b/, /\bpercentage\b/] },
+  { field: 'goalName', label: 'goal name', patterns: [/\bgoal\s+name\b/] },
+  { field: 'targetDate', label: 'target date', patterns: [/\btarget\s+date\b/] },
+  { field: 'feeType', label: 'fee type', patterns: [/\bfee\s+type\b/] },
+  { field: 'overdraftLimit', label: 'overdraft limit', patterns: [/\boverdraft\s+(?:limit|threshold)\b/, /\bthreshold\b/] },
+  // card / activation-notice (image) fields — let a specific question be answered from OCR alone.
+  { field: 'activationChannel', label: 'activation channel', patterns: [/\bactivation\s+channel\b/] },
+  { field: 'noticeId', label: 'notice id', patterns: [/\bnotice\s+id\b/] },
+  { field: 'cardType', label: 'card type', patterns: [/\bcard\s+type\b/] },
+  { field: 'expiry', label: 'expiry', patterns: [/\bexpir(?:y|es|ation)\b/] },
+  { field: 'recommendedStep', label: 'recommended step', patterns: [/\brecommended\s+step\b/, /\bnext\s+step\b/] },
 ];
 
 const FIELD_ALIASES = {
@@ -398,9 +624,31 @@ const FIELD_ALIASES = {
   monthlyPaymentExample: ['monthlyPaymentExample', 'exampleMonthlyPayment', 'monthlyPayment'],
   estimatedRate: ['estimatedRate', 'rate', 'interestRate'],
   status: ['status'],
-  amount: ['amount', 'totalAmount', 'amountDue', 'total', 'maxAmount', 'maximumAmount', 'loanAmount'],
+  amount: ['amount', 'feeAmount', 'totalAmount', 'amountDue', 'total', 'maxAmount', 'maximumAmount', 'loanAmount'],
+  feeAmount: ['feeAmount', 'amount'],
+  scheduledDate: ['scheduledDate', 'billingDate', 'paymentDate', 'date'],
   dueDate: ['dueDate', 'paymentDueDate', 'deadline'],
   billReference: ['billReference', 'billRef', 'invoiceReference', 'reference'],
+  merchant: ['merchant', 'provider', 'beneficiary'],
+  provider: ['provider', 'merchant'],
+  accountId: ['accountId', 'account', 'sourceAccountId'],
+  sourceAccount: ['sourceAccount', 'sourceAccountId', 'accountId', 'account'],
+  holderName: ['holderName', 'customerName', 'name'],
+  iban: ['iban'],
+  rib: ['rib'],
+  receiptId: ['receiptId', 'reference'],
+  ticketId: ['ticketId', 'reference'],
+  queueNumber: ['queueNumber', 'ticketNumber'],
+  estimatedWait: ['estimatedWait'],
+  service: ['service'],
+  servicePoint: ['servicePoint', 'window'],
+  targetAmount: ['targetAmount'],
+  savedAmount: ['savedAmount'],
+  progressPercentage: ['progressPercentage', 'percentage', 'progress'],
+  goalName: ['goalName'],
+  targetDate: ['targetDate'],
+  feeType: ['feeType'],
+  overdraftLimit: ['overdraftLimit', 'threshold'],
 };
 
 const getEntryFieldValue = (entry = {}, requestedField = '') => {
@@ -531,6 +779,7 @@ const buildDecision = ({
   explicitPage = null,
   safetyDecision = 'allowed',
   resourceMemoryMatch = null,
+  plannerDecision = null,
   reason,
 }) => ({
   case: caseName,
@@ -544,6 +793,7 @@ const buildDecision = ({
   explicitPage,
   safetyDecision,
   resourceMemoryMatch,
+  ...(plannerDecision ? { plannerDecision } : {}),
   reason,
 });
 
@@ -567,6 +817,64 @@ const routeAgentCase = ({ message, memoryContext = {} } = {}) => {
       detailHint: null,
       safetyDecision: 'refuse',
       reason: 'The user asks to bypass safety or access another user or secret data.',
+    });
+  }
+
+  if (isExplicitActionPreparationRequest(message)) {
+    return buildDecision({
+      caseName: CASES.BANKING_ACTION,
+      modelMode: 'text',
+      needsResourceSearch: false,
+      needsPdfVision: false,
+      needsActionFlow: true,
+      resourceHint: null,
+      detailHint,
+      reason: 'The user asks the backend to prepare a banking action.',
+    });
+  }
+
+  if (isComplaintStatusEligible(message)) {
+    const hasReference = COMPLAINT_REFERENCE_PATTERN.test(String(message || ''));
+    return buildDecision({
+      caseName: CASES.BANKING_ACTION,
+      modelMode: 'text',
+      needsResourceSearch: false,
+      needsPdfVision: false,
+      needsActionFlow: true,
+      resourceHint: null,
+      detailHint,
+      plannerDecision: {
+        intentType: 'action_prepare',
+        mode: 'banking_action',
+        resourceNeed: false,
+        needsResourceSearch: false,
+        resourceQuery: null,
+        resourceSearchQuery: null,
+        resourceCategoryHint: null,
+        needsVision: false,
+        needsActionFlow: true,
+        needsDownload: false,
+        actionType: 'check_complaint_status',
+        actionName: 'check_complaint_status',
+        missingFields: hasReference ? [] : ['reference'],
+        userGoal: String(message || '').trim() || null,
+        confidence: 1,
+        reason: 'The user explicitly asks about a complaint status or complaint reference.',
+      },
+      reason: 'The user explicitly asks about a complaint status or complaint reference.',
+    });
+  }
+
+  if (!trueResourceFollowup && isResourceFirstQuestion(message, resourceHint)) {
+    return buildDecision({
+      caseName: isDownloadRequest(message) ? CASES.RESOURCE_DOWNLOAD : CASES.LARAGON_RESOURCE_METADATA,
+      modelMode: 'text',
+      needsResourceSearch: true,
+      needsPdfVision: false,
+      needsActionFlow: false,
+      resourceHint: resourceHint || (isCardResourceQuestion(message) ? 'Credit Card Limit Notice' : message),
+      detailHint,
+      reason: 'The user asks a resource-like question, so stored resources should be searched before account clarification.',
     });
   }
 
@@ -610,9 +918,9 @@ const routeAgentCase = ({ message, memoryContext = {} } = {}) => {
   if (/\bpdf\b|\bdocument\b|\bresource\b|\bfile\b/.test(text) && resourceHint && hasDetailQuestion(message)) {
     return buildDecision({
       caseName: CASES.SPECIFIC_PDF_DETAIL,
-      modelMode: 'vision',
+      modelMode: 'text',
       needsResourceSearch: true,
-      needsPdfVision: true,
+      needsPdfVision: false,
       resourceHint,
       detailHint,
       reason: 'The user asks for a specific detail from a named PDF resource.',
@@ -622,9 +930,9 @@ const routeAgentCase = ({ message, memoryContext = {} } = {}) => {
   if (explicitPage && trueResourceFollowup) {
     return buildDecision({
       caseName: CASES.EXPLICIT_PAGE_QUESTION,
-      modelMode: 'vision',
+      modelMode: 'text',
       needsResourceSearch: Boolean(resourceHint && !hasMemoryResource(memoryContext)),
-      needsPdfVision: true,
+      needsPdfVision: false,
       resourceHint,
       detailHint: detailHint || `page ${explicitPage}`,
       explicitPage,
@@ -672,6 +980,18 @@ const routeAgentCase = ({ message, memoryContext = {} } = {}) => {
     });
   }
 
+  if (isGenericResourceQuestion(message, resourceHint)) {
+    return buildDecision({
+      caseName: CASES.LARAGON_RESOURCE_METADATA,
+      modelMode: 'text',
+      needsResourceSearch: true,
+      needsPdfVision: false,
+      resourceHint: resourceHint || message,
+      detailHint,
+      reason: 'The user asks a resource-like question that should search stored resources before generic account or natural chat handling.',
+    });
+  }
+
   if (resourceHint && isMetadataQuestion(message)) {
     return buildDecision({
       caseName: CASES.LARAGON_RESOURCE_METADATA,
@@ -699,13 +1019,13 @@ const routeAgentCase = ({ message, memoryContext = {} } = {}) => {
 
   if (resourceHint && hasDetailQuestion(message) && !isMetadataQuestion(message)) {
     return buildDecision({
-      caseName: CASES.LARAGON_PDF_VISION,
-      modelMode: 'vision',
+      caseName: CASES.LARAGON_RESOURCE_METADATA,
+      modelMode: 'text',
       needsResourceSearch: true,
-      needsPdfVision: true,
+      needsPdfVision: false,
       resourceHint,
       detailHint,
-      reason: 'The user asks for content that may require reading a matching PDF.',
+      reason: 'The user asks for content from a matching resource via text extraction.',
     });
   }
 
@@ -723,9 +1043,12 @@ const routeAgentCase = ({ message, memoryContext = {} } = {}) => {
 
 module.exports = {
   CASES,
+  detectRequestedResourceFields,
   extractExplicitPage,
   findResourceHistoryFollowup,
   hasClearNewResourceTarget,
+  hasResourceObjectDetected,
+  isComplaintStatusEligible,
   isTrueResourceFollowup,
   routeAgentCase,
 };

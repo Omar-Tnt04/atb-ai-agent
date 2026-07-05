@@ -24,6 +24,12 @@ const aiRoutingPayload = (routing) => ({
   visionUsed: routing.visionUsed,
 });
 
+const isImageMimeType = (mimeType = '') =>
+  String(mimeType || '').toLowerCase().startsWith('image/');
+
+const visionRequestTimeoutMsForMimeType = (mimeType = '') =>
+  isImageMimeType(mimeType) ? env.visionRequestTimeoutMs : 60000;
+
 const IMPORTANT_RESOURCE_KEYS = [
   'resourceId',
   'id',
@@ -179,17 +185,44 @@ const trimResolvedResourceContext = (context = null) => {
   return trimmed;
 };
 
+const trimResourceResponseWriterContext = (writer = null, maxChars = env.maxContextChars) => {
+  if (!writer || typeof writer !== 'object') return writer;
+  const compact = { ...writer };
+
+  if (compact.resource && typeof compact.resource === 'object') {
+    compact.resource = {
+      ...compact.resource,
+      summary: compact.resource.summary
+        ? trimText(compact.resource.summary, Math.min(900, maxChars))
+        : compact.resource.summary,
+      fields: compactResourceJson(compact.resource.fields || {}, Math.floor(maxChars * 0.4)),
+    };
+  }
+
+  if (compact.actionDraft && typeof compact.actionDraft === 'object') {
+    compact.actionDraft = {
+      ...compact.actionDraft,
+      fields: compactResourceJson(compact.actionDraft.fields || {}, Math.floor(maxChars * 0.25)),
+    };
+  }
+
+  if (Array.isArray(compact.resources)) {
+    compact.resources = compact.resources.slice(0, 3).map((resource) =>
+      compactResourceJson(resource, Math.floor(maxChars * 0.25)),
+    );
+  }
+
+  return compact;
+};
+
 const trimAgentContext = (agentContext = null) => {
   if (!agentContext || typeof agentContext !== 'object') return agentContext;
   const maxChars = Math.max(500, env.maxContextChars);
   const context = { ...agentContext };
 
-  if (context.resourceResponseWriter?.resources) {
+  if (context.resourceResponseWriter) {
     context.resourceResponseWriter = {
-      ...context.resourceResponseWriter,
-      resources: context.resourceResponseWriter.resources.slice(0, 5).map((resource) =>
-        compactResourceJson(resource, Math.floor(maxChars * 0.5)),
-      ),
+      ...trimResourceResponseWriterContext(context.resourceResponseWriter, maxChars),
     };
   }
 
@@ -258,6 +291,8 @@ const clearLargeTempReferences = (payload) => {
   }
   if (payload.agentContext?.resourceResponseWriter) {
     payload.agentContext.resourceResponseWriter.resources = [];
+    payload.agentContext.resourceResponseWriter.resource = null;
+    payload.agentContext.resourceResponseWriter.actionDraft = null;
   }
   payload.conversationHistory = [];
 };
@@ -434,6 +469,9 @@ const planIntent = async ({
   fileContext,
   profileContext,
   agentContext,
+  threadContext = null,
+  requestContext = null,
+  agentPlan = null,
 }) => {
   const timer = startTimer();
   const routing = selectModel({ requiresVision: false });
@@ -446,7 +484,7 @@ const planIntent = async ({
     endpoint: '/agent/plan',
     mode: 'text',
     promptType: 'intent_planner',
-    messagePreview: messagePreview(message),
+    messageLength: String(message || '').length,
     ...routingLogFields(routing),
   });
   try {
@@ -465,6 +503,9 @@ const planIntent = async ({
         profileContext,
         agentContext,
         modelRouting: aiRoutingPayload(routing),
+        ...(threadContext ? { threadContext } : {}),
+        ...(requestContext ? { requestContext } : {}),
+        ...(agentPlan ? { agentPlan } : {}),
       },
     });
     requestPayload = trimmed.payload;
@@ -477,7 +518,13 @@ const planIntent = async ({
       endpoint: '/agent/plan',
       latencyMs: endTimer(timer),
       status: response.status,
-      mode: response.data?.data?.mode,
+      intentType: response.data?.data?.intentType || response.data?.data?.mode,
+      resourceNeed: response.data?.data?.resourceNeed ?? response.data?.data?.needsResourceSearch,
+      resourceQueryLength: String(response.data?.data?.resourceQuery || response.data?.data?.resourceSearchQuery || '').length,
+      userGoalLength: String(response.data?.data?.userGoal || '').length,
+      missingFieldCount: Array.isArray(response.data?.data?.missingFields)
+        ? response.data.data.missingFields.length
+        : 0,
       ...routingLogFields(routing),
     });
     return response.data;
@@ -523,50 +570,44 @@ const analyzeVisionDocument = async ({
   mimeType,
   pdfBase64,
   resourceJson,
+  goal,
   maxPages,
   pageNumbers,
   detailMode,
 }) => {
   const timer = startTimer();
-  const routing = selectModel({ requiresVision: true });
+  const routing = selectModel({ requiresVision: false });
+  const isImagePayload = isImageMimeType(mimeType);
+  const requestTimeoutMs = visionRequestTimeoutMsForMimeType(mimeType);
   let requestPayload = null;
   let contextCharsBefore = 0;
   let contextCharsAfter = 0;
-  if (!routing.directVisionSupported) {
-    const error = new Error('Direct vision analysis is unsupported when MODEL_ROUTING_MODE=text_only');
-    error.code = 'VISION_UNSUPPORTED_BY_MODEL_ROUTING';
-    logError('pdf_vision_request_blocked', error, {
-      requestId,
-      threadId,
+  if (env.architectureLogsEnabled) {
+    console.log('[ai-client] sending OCR extraction request:', {
       endpoint: '/agent/analyze-vision-document',
-      latencyMs: endTimer(timer),
-      ...routingLogFields(routing),
+      source,
+      fileType: isImagePayload ? 'image' : 'pdf',
+      mimeType,
+      payloadLength: pdfBase64 ? String(pdfBase64).length : 0,
+      maxPages,
+      pageNumbers,
+      detailMode: Boolean(detailMode),
+      selected_model: routing.selectedModel,
+      vision_used: false,
+      requestTimeoutMs,
     });
-    throw error;
   }
-  console.log('[ai-client] sending PDF vision request:', {
-    endpoint: '/agent/analyze-vision-document',
-    source,
-    mimeType,
-    pdfBase64Length: pdfBase64 ? String(pdfBase64).length : 0,
-    maxPages,
-    pageNumbers,
-    detailMode: Boolean(detailMode),
-    modelProvider: 'python_ai_service',
-    model_routing_mode: routing.modelRoutingMode,
-    selected_model: routing.selectedModel,
-    selected_model_reason: routing.selectedModelReason,
-    vision_used: routing.visionUsed,
-  });
-  logArchitecture('pdf_vision_request_sent', {
+  logArchitecture('ocr_document_request_sent', {
     requestId,
     threadId,
     endpoint: '/agent/analyze-vision-document',
-    mode: 'vision',
+    mode: 'ocr',
     selectedPages: pageNumbers,
     detailMode: Boolean(detailMode),
     pageCount: Array.isArray(pageNumbers) ? pageNumbers.length : 0,
     messagePreview: messagePreview(message),
+    selected_model: routing.selectedModel,
+    requestTimeoutMs,
     ...routingLogFields(routing),
   });
 
@@ -590,12 +631,13 @@ const analyzeVisionDocument = async ({
     });
     contextCharsBefore = trimmed.contextCharsBefore;
     contextCharsAfter = trimmed.contextCharsAfter;
-    requestPayload = {
+      requestPayload = {
       ...trimmed.payload,
       source,
       fileName,
       mimeType,
       pdfBase64,
+      ...(goal ? { goal } : {}),
       maxPages,
       pageNumbers,
       detailMode,
@@ -605,18 +647,29 @@ const analyzeVisionDocument = async ({
       `${env.aiServiceUrl}/agent/analyze-vision-document`,
       requestPayload,
       {
-        timeout: 180000,
+        timeout: requestTimeoutMs,
       },
     );
-    console.log('[ai-client] PDF vision response received:', {
-      status: response.status,
-      hasData: Boolean(response.data?.data),
-      model_routing_mode: routing.modelRoutingMode,
-      selected_model: routing.selectedModel,
-      selected_model_reason: routing.selectedModelReason,
-      vision_used: routing.visionUsed,
-    });
-    logArchitecture('pdf_vision_response_received', {
+    if (!response.data?.data) {
+      logArchitecture('ocr_empty_response', {
+        requestId,
+        threadId,
+        endpoint: '/agent/analyze-vision-document',
+        ocr_empty_response: true,
+        selected_model: routing.selectedModel,
+        isImagePayload,
+      });
+    }
+    if (env.architectureLogsEnabled) {
+      console.log('[ai-client] OCR response received:', {
+        status: response.status,
+        hasData: Boolean(response.data?.data),
+        selected_model: routing.selectedModel,
+        vision_used: false,
+        extractedFieldCount: Object.keys(response.data?.data?.extractedFields || {}).length,
+      });
+    }
+    logArchitecture('ocr_document_response_received', {
       requestId,
       threadId,
       endpoint: '/agent/analyze-vision-document',
@@ -627,6 +680,32 @@ const analyzeVisionDocument = async ({
     });
     return response.data;
   } catch (error) {
+    const detail = String(error?.response?.data?.detail || error?.message || '');
+    const didTimeout =
+      error?.code === 'ECONNABORTED' ||
+      /timeout|timed?\s*out|vision_timeout/i.test(detail);
+    if (didTimeout) {
+      error.code = 'VISION_TIMEOUT';
+      logArchitecture('ocr_timeout', {
+        requestId,
+        threadId,
+        endpoint: '/agent/analyze-vision-document',
+        ocr_timeout: true,
+        timeoutMs: requestTimeoutMs,
+        selected_model: routing.selectedModel,
+        isImagePayload,
+      });
+    }
+    if (/empty_ollama_response/i.test(detail)) {
+      logArchitecture('ocr_empty_response', {
+        requestId,
+        threadId,
+        endpoint: '/agent/analyze-vision-document',
+        ocr_empty_response: true,
+        selected_model: routing.selectedModel,
+        isImagePayload,
+      });
+    }
     logError('pdf_vision_request_failed', error, {
       requestId,
       threadId,
@@ -655,9 +734,140 @@ const analyzeVisionDocument = async ({
   }
 };
 
+const rerankResources = async ({ requestId, threadId, message, candidates }) => {
+  const timer = startTimer();
+  const routing = selectModel({ requiresVision: false });
+  logArchitecture('resource_reranker_started', {
+    requestId,
+    threadId,
+    endpoint: '/agent/rerank-resources',
+    mode: 'text',
+    candidateCount: candidates?.length ?? 0,
+    ...routingLogFields(routing),
+  });
+  try {
+    const response = await axios.post(`${env.aiServiceUrl}/agent/rerank-resources`, {
+      requestId,
+      threadId,
+      message,
+      candidates: candidates || [],
+      modelRouting: aiRoutingPayload(routing),
+    });
+    logArchitecture('resource_reranker_finished', {
+      requestId,
+      threadId,
+      endpoint: '/agent/rerank-resources',
+      latencyMs: endTimer(timer),
+      status: response.status,
+      chosenId: response.data?.data?.chosenId,
+      ...routingLogFields(routing),
+    });
+    return response.data;
+  } catch (error) {
+    logError('resource_reranker_failed', error, {
+      requestId,
+      threadId,
+      endpoint: '/agent/rerank-resources',
+      latencyMs: endTimer(timer),
+    });
+    throw error;
+  }
+};
+
+// ⚠️ NOT PART OF THE TRUSTED BANKING ANSWER PATH — DO NOT WIRE INTO RESOURCE QA. ⚠️
+// This calls /agent/answer-from-descriptions, which answers FREELY from full catalog descriptions.
+// The production flow uses descriptions for retrieval/selection ONLY; banking facts come from the
+// trusted file + fact extraction + reformulation + deterministic fallback. This export is retained
+// for diagnostics/experiments only and is intentionally NOT imported by the chat controller.
+const answerFromDescriptions = async ({ requestId, threadId, message, candidates }) => {
+  const timer = startTimer();
+  const routing = selectModel({ requiresVision: false });
+  logArchitecture('description_qa_started', {
+    requestId,
+    threadId,
+    endpoint: '/agent/answer-from-descriptions',
+    mode: 'text',
+    candidateCount: candidates?.length ?? 0,
+    ...routingLogFields(routing),
+  });
+  try {
+    const response = await axios.post(`${env.aiServiceUrl}/agent/answer-from-descriptions`, {
+      requestId,
+      threadId,
+      message,
+      candidates: candidates || [],
+      modelRouting: aiRoutingPayload(routing),
+    });
+    logArchitecture('description_qa_finished', {
+      requestId,
+      threadId,
+      endpoint: '/agent/answer-from-descriptions',
+      latencyMs: endTimer(timer),
+      status: response.status,
+      selectedResourceId: response.data?.data?.selectedResourceId,
+      answerableFromDescription: response.data?.data?.answerableFromDescription,
+      ...routingLogFields(routing),
+    });
+    return response.data;
+  } catch (error) {
+    logError('description_qa_failed', error, {
+      requestId,
+      threadId,
+      endpoint: '/agent/answer-from-descriptions',
+      latencyMs: endTimer(timer),
+    });
+    throw error;
+  }
+};
+
+// Reformulation: the model receives ONLY pre-extracted facts (never the full description), so it
+// cannot mix rows. Used by the resource_qa description-analysis path for natural wording.
+const reformulateAnswer = async ({ requestId, threadId, userQuestion, selectedResourceId, extractedFacts }) => {
+  const timer = startTimer();
+  const routing = selectModel({ requiresVision: false });
+  logArchitecture('reformulate_answer_started', {
+    requestId,
+    threadId,
+    endpoint: '/agent/reformulate-answer',
+    mode: 'text',
+    ...routingLogFields(routing),
+  });
+  try {
+    const response = await axios.post(`${env.aiServiceUrl}/agent/reformulate-answer`, {
+      requestId,
+      threadId,
+      userQuestion,
+      selectedResourceId,
+      extractedFacts: extractedFacts || {},
+      modelRouting: aiRoutingPayload(routing),
+    });
+    logArchitecture('reformulate_answer_finished', {
+      requestId,
+      threadId,
+      endpoint: '/agent/reformulate-answer',
+      latencyMs: endTimer(timer),
+      status: response.status,
+      ...routingLogFields(routing),
+    });
+    return response.data;
+  } catch (error) {
+    logError('reformulate_answer_failed', error, {
+      requestId,
+      threadId,
+      endpoint: '/agent/reformulate-answer',
+      latencyMs: endTimer(timer),
+    });
+    throw error;
+  }
+};
+
 module.exports = {
   analyzeMessage,
   analyzeVisionDocument,
+  answerFromDescriptions,
   decideMessage,
   planIntent,
+  reformulateAnswer,
+  rerankResources,
+  visionRequestTimeoutMsForMimeType,
 };

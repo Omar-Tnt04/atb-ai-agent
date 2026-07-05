@@ -1,4 +1,6 @@
 import MarkdownMessage from './MarkdownMessage.jsx';
+import { useTypewriter } from '../hooks/useTypewriter.js';
+import { balanceMarkdown } from '../utils/markdownBalance.js';
 
 const ACTION_LABELS = {
   confirm: 'Confirm',
@@ -9,7 +11,7 @@ const ACTION_LABELS = {
 };
 
 const getQuickActionUrl = (action = {}) =>
-  action.url || action.downloadUrl || action.fileUrl || '';
+  action.url || action.viewUrl || action.downloadUrl || action.fileUrl || '';
 
 function isDownloadLikeAction(action = {}) {
   const actionType = action.action || action.type || '';
@@ -94,10 +96,13 @@ function getActionLabel(action) {
   return rawLabel;
 }
 
-function MessageBubble({ message, onAction }) {
+function MessageBubble({ message, onAction, animate = false }) {
   const isUser = message.role === 'user';
   const quickActions = isUser ? [] : dedupeQuickActions(message.quickActions || []);
   const smsChallenge = !isUser ? message.smsChallenge : null;
+  const shouldAnimate = animate && !isUser && !message.isError;
+  const { visible, done } = useTypewriter(message.content, { enabled: shouldAnimate });
+  const renderedContent = shouldAnimate && !done ? balanceMarkdown(visible) : message.content;
 
   return (
     <article className={`message-row ${isUser ? 'message-row-user' : 'message-row-bot'}`}>
@@ -112,7 +117,7 @@ function MessageBubble({ message, onAction }) {
             .join(' ')}
         >
           <div className="message-content">
-            {isUser ? message.content : <MarkdownMessage content={message.content} />}
+            {isUser ? message.content : <MarkdownMessage content={renderedContent} />}
           </div>
           {smsChallenge ? (
             <form
