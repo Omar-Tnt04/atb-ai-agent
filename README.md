@@ -1,178 +1,313 @@
-﻿# ATB AI Banking Agent
+# Generic Website AI Agent
 
-Local MVP / Proof of Concept for a secure AI banking assistant for ATB.
+A local MVP / proof of concept for a website AI agent that can answer questions about a target website and help users navigate it.
 
-## Main Stack
+The current demo target is the ATB public website, but the architecture is designed to be reusable for any website that can be indexed into context files.
 
-- React Web App
-- React Native Expo Mobile App
-- Node.js / Express Backend
-- Python / FastAPI AI Service
-- Ollama Open-Source LLM
-- Supabase PostgreSQL
-- Internal Demo Services (separate local Express apps)
-- Risk-Based SMS Verification
-- Admin Dashboard
-- Audit Logging
+## What the agent does
 
-## Main Objective
+The agent supports two main modes:
 
-Build an authenticated AI banking agent that understands banking requests, selects available actions, checks permissions, asks for confirmation, applies SMS verification for high-risk actions, routes execution through internal service connectors, and returns clear results inside the chat.
+### ASK mode
 
-## Internal Services Demo
+ASK mode answers questions about the target website.
 
-The MVP uses separate local Express services to simulate ATB internal applications. The AI agent does not execute actions directly. It detects intent, then the backend orchestrator calls the appropriate internal service through a connector. In production, these local service URLs are replaced by real ATB internal APIs.
+It uses:
 
-### Architecture
+- normalized user queries
+- one shared `bge-m3` embedding per request
+- semantic retrieval over website context
+- optional catalog/resource evidence
+- `qwen3:14b` answer synthesis
+- evidence-based guardrails to reduce hallucinations
+
+Runtime context:
 
 ```text
-User -> React Chat/Widget -> Node Chat Route -> Python AI Decision Stage -> Node Secure Resource/Action Layer -> Python AI Final Response -> Result -> Admin Dashboard
+site-context/<domain>/ask-context.json
 ```
 
-Checkpoint 2 follows the supervisor-requested Ollama-first flow conceptually:
+Current demo file:
 
-- AI decides whether the request is `answer_directly`, `search_resource`, `prepare_action`, or `ask_clarification`.
-- Backend validates and executes resource lookups/actions. Laragon JSON/PDF URLs, internal services, confirmations, SMS verification, and audit logs stay backend-controlled.
-- Frontend displays the final Markdown answer, quick actions, Download PDF, Confirm, and Cancel controls.
+```text
+site-context/atb.tn/ask-context.json
+```
 
-### Checkpoint 3 hybrid routing
+### ACT mode
 
-The main flow uses a hybrid, resource-first architecture. The backend searches
-and resolves resources before any model call, so normal JSON, TXT, PDF-text,
-and resource questions are handled with `qwen2.5:7b`. `qwen3-vl:8b` is reserved
-for images, scanned PDFs, and explicit visual reasoning.
+ACT mode helps the user navigate the website.
 
-Backend RAM does not cache raw PDFs, images, base64 payloads, full prompts, or
-full model responses. The vision-summary cache is disabled by default; if a
-production cache is added later, it should store only small extracted JSON
-outside app memory, never raw files.
+It can find and open:
 
-The benchmark script compares `qwen2.5:7b` and `qwen3-vl:8b` and exports both
-CSV and JSON results.
+- pages
+- documents
+- public resources
+- useful website targets
 
-### Internal services
+It uses semantic navigation over the generated site index, plus hybrid ranking with exact matching, document matching, and dead-page / 404 filtering.
 
-| Service              | Port | Purpose                          |
-| -------------------- | ---- | -------------------------------- |
-| payment-service      | 7101 | Bill payments and transfers      |
-| document-service     | 7102 | Document generation and download |
-| atb-service          | 7106 | Customers, cards, branches, products, and complaints |
-| appointment-service  | 7104 | Branch appointment slots/booking |
-| account-service      | 7105 | Account balance lookups          |
+Runtime index:
 
-Each service exposes `GET /health`. The backend connectors call these services
-over HTTP. If a service is disabled, offline, or unreachable, the action is not
-executed against a mock fallback — the agent returns a clean
-`The internal service is currently unavailable.` message and the failed attempt
-is audited.
+```text
+site-context/<domain>/site-index.json
+```
 
-## Run the full MVP locally
+Current demo file:
+
+```text
+site-context/atb.tn/site-index.json
+```
+
+## High-level architecture
+
+```text
+User
+  ?
+Widget frontend
+  ?
+Node.js backend
+  ?
+Request preparation
+  - normalize text
+  - detect language
+  - create one bge-m3 embedding
+  ?
+ASK or ACT routing
+
+ASK:
+  semantic retrieval over ask-context/catalog
+  ?
+  qwen3:14b synthesis
+  ?
+  grounded Markdown answer
+
+ACT:
+  semantic navigation over site-index
+  ?
+  hybrid ranking
+  ?
+  open page/document/navigation target
+```
+
+## Main stack
+
+- Node.js / Express backend
+- React / Vite widget frontend
+- Chrome extension demo injector
+- Ollama local models
+- `qwen3:14b` for answer generation
+- `bge-m3` for embeddings / semantic search
+- Playwright-based capture/export tooling
+- Generated website context and navigation JSON files
+
+## Repository structure
+
+```text
+backend-node/
+  Node.js backend, ASK/ACT routes, semantic services, resource/catalog logic
+
+widget-agent/
+  React widget frontend and production widget loader
+
+widget-injector-extension/
+  Chrome extension used to inject the widget into a live website for demo purposes
+
+scripts/
+  Website indexing, context generation, Playwright capture, and dev helper scripts
+
+site-context/
+  Generated runtime context files for indexed websites
+
+docs/
+  Architecture notes and diagrams
+```
+
+## Deployment methods
+
+### 1. Demo method: Chrome extension
+
+The Chrome extension is used when we do not control the target website source code.
+
+It injects the widget into the website for demonstration.
+
+```text
+User opens target website
+  ?
+Chrome extension injects widget
+  ?
+Widget talks to local/backend API
+```
+
+This is useful for internship demos and prototypes.
+
+Customers should not need to install the extension in production.
+
+### 2. Production method: script tag
+
+In production, the website owner adds the widget loader script to the website.
+
+Example:
+
+```html
+<script
+  src="https://widget.example.com/atb-widget-loader.js"
+  data-api-url="https://ai-agent-api.example.com"
+  data-widget-url="https://widget.example.com">
+</script>
+```
+
+Meaning:
+
+- `src` points to the hosted widget loader script
+- `data-widget-url` points to the hosted widget frontend
+- `data-api-url` points to the hosted backend API
+
+The loader script in this repo is:
+
+```text
+widget-agent/public/atb-widget-loader.js
+```
+
+For local development:
+
+```html
+<script
+  src="http://localhost:5174/atb-widget-loader.js"
+  data-api-url="http://localhost:5000"
+  data-widget-url="http://localhost:5174">
+</script>
+```
+
+For a real HTTPS website, the widget and backend should also be hosted on HTTPS domains.
+
+## Local setup
+
+### 1. Install dependencies
+
+From the repo root:
+
+```powershell
+npm install
+npm --prefix backend-node install
+npm --prefix widget-agent install
+```
+
+### 2. Install Ollama models
 
 Make sure Ollama is installed and running.
 
-Make sure the `qwen2.5:7b` model exists locally:
-
-```bash
-ollama list
+```powershell
+ollama pull qwen3:14b
+ollama pull bge-m3
 ```
 
-Recommended:
+### 3. Configure backend environment
 
-```bash
+Copy the example env file:
+
+```powershell
+copy backend-node\.env.example backend-node\.env
+```
+
+Important values:
+
+```env
+ASK_USE_SEMANTIC_RETRIEVAL=true
+ASK_USE_LLM_SYNTHESIS=true
+ASK_SYNTHESIS_MODEL=qwen3:14b
+ASK_EMBEDDING_MODEL=bge-m3
+
+REQUEST_PREPARE_EMBEDDING=true
+ACT_USE_SEMANTIC_NAVIGATION=true
+ACT_EMBEDDING_MODEL=bge-m3
+```
+
+For the current demo catalog/resources:
+
+```env
+RESOURCE_ROOT_DIR=C:/laragon/www/atb-general-resources
+RESOURCE_CATALOG_PATH=C:/laragon/www/atb-general-resources/catalog.json
+RESOURCE_BASE_URL=http://localhost/atb-general-resources
+```
+
+These values are local-only and should stay in `backend-node/.env`, not in GitHub.
+
+### 4. Start the app
+
+```powershell
 npm run dev
 ```
 
-This runs all services in one terminal with clean output.
-
-Full logs for debugging:
-
-```bash
-npm run dev:verbose
-```
-
-Separate terminals:
-
-```bash
-npm run dev:separate
-```
-
-This opens separate terminals.
-
-`npm run dev` starts all processes with readable prefixes:
-`[api]`, `[ai]`, `[web]`, `[pay]`, `[doc]`, `[atb]`, `[apt]`, `[acc]`.
-
-Run individual services:
-
-```bash
-npm run dev:backend
-npm run dev:ai
-npm run dev:web
-npm run dev:pay
-npm run dev:doc
-npm run dev:atb
-npm run dev:apt
-npm run dev:acc
-```
-
-Open the web app at:
+Expected local services:
 
 ```text
-http://localhost:5173
+Backend API:     http://localhost:5000
+Widget frontend: http://localhost:5174
+Ollama:          http://localhost:11434
 ```
 
-Demo access:
+## Main scripts
+
+See:
 
 ```text
-USER:  user@atb.com / user123
-ADMIN: admin@atb.com / admin123
+scripts/README.md
 ```
 
-USER accounts open the Chat experience. ADMIN accounts open the Admin Dashboard.
-
-## Chat file uploads
-
-The chat supports local MVP uploads for banking PDFs and images, plus simple
-TXT, CSV, and JSON files. PDF text extraction, scanned/image PDF handling,
-image OCR, and text/CSV/JSON understanding are handled by the backend file
-context service.
-
-## Laragon demo resources
-
-For the current local demo, Laragon resources live in:
+Most important scripts:
 
 ```text
-C:\laragon\www\atb-general-resources
+scripts/build-site-context.js
+scripts/build-site-index.js
+scripts/export-playwright-capture.js
 ```
 
-The active local resource base URL is:
+They generate or support the website context and navigation data used by ASK mode and ACT mode.
+
+## Runtime context files
+
+The important committed runtime files for the current demo are:
 
 ```text
-http://localhost/atb-general-resources
+site-context/atb.tn/ask-context.json
+site-context/atb.tn/site-index.json
 ```
 
-The backend reads the catalog from
-`http://localhost/atb-general-resources/json/catalog.json` and resolves PDFs
-under `http://localhost/atb-general-resources/documents/`.
+They are committed so the agent can work after cloning the repository.
 
-The chat route does not search this catalog until the AI decision stage returns
-`search_resource`. After that decision, the backend searches the catalog,
-validates the selected resource URL against the configured resource base URL,
-extracts trusted PDF text when available, and sends the resolved context back
-to the AI service for the final answer.
+Generated screenshots, Playwright captures, semantic caches, logs, temporary files, and local `.env` files should not be committed.
 
-## Connector layer
+## Validation commands
 
-The backend has a stable connector layer that is the boundary between actions
-and the services that perform them. In this MVP the normal action path routes
-through internal connectors that call the internal demo services over HTTP. In
-production, the connectors point at real ATB internal APIs without changing the
-action registry.
+Focused backend checks:
 
-Service URLs and any credentials belong only in the backend `.env`; the frontend
-and AI service do not receive or call those services directly. The AI only
-selects an allowed action. The backend performs permission checks,
-confirmation/SMS flow, connector execution, and audit logging.
+```powershell
+node backend-node/tests/askContext.test.js
+node backend-node/tests/catalogRetrieval.test.js
+node backend-node/tests/requestPreparation.test.js
+npm --prefix backend-node run test:browser-routing
+```
 
-Use `GET /integrations/connectors` to list available connector operations and
-`GET /integrations/internal/status` to see each internal service as
-`Connected`, `Offline`, or `Disabled`.
+Widget build:
+
+```powershell
+npm --prefix widget-agent run build
+```
+
+## Current status
+
+The main branch contains the final semantic ASK/ACT widget-agent implementation.
+
+The current demo target is ATB, but the intended architecture is a reusable website agent pipeline:
+
+```text
+crawl/capture website
+  ?
+generate ask-context.json and site-index.json
+  ?
+run semantic ASK/ACT backend
+  ?
+serve widget frontend
+  ?
+inject with extension for demo or script tag for production
+```
