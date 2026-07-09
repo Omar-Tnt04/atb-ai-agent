@@ -239,6 +239,226 @@ const sanitizeAssistantText = (value = '') => {
   return looksLikeJsonPayload(withoutDebugBlocks) ? '' : withoutDebugBlocks;
 };
 
+// ── Source parsing ─────────────────────────────────────────────────────────────
+// Backend appends human "Source:" lines to the answer text, e.g.
+//   Source: ask-context.json — https://atb.tn/... | https://atb.tn/...
+//   Source: catalog.json (id=qr-merchant-payment-receipt, category=payment_receipt)
+// We strip these from the visible answer and turn them into structured chips so the
+// bubble stays clean and long URLs never render as raw text.
+const SOURCE_LINE_RE = /^[ \t>*-]*source\s*:/i;
+
+const titleCase = (value = '') =>
+  String(value || '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => (word.length <= 2 ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1)))
+    .join(' ');
+
+const idToTitle = (id = '') => titleCase(String(id || '').replace(/[-_]+/g, ' '));
+
+const prettifyFromUrl = (url = '') => {
+  try {
+    const parsed = new URL(url);
+    let segment = parsed.pathname.split('/').filter(Boolean).pop() || parsed.hostname;
+    segment = segment
+      .replace(/\.[a-z0-9]+$/i, '')       // drop extension (.php)
+      .replace(/[-_]?presentation$/i, '') // drop trailing "presentation"
+      .replace(/[-_]+/g, ' ')
+      .trim();
+    if (!segment) segment = parsed.hostname.replace(/^www\./, '');
+    return titleCase(segment);
+  } catch {
+    return url;
+  }
+};
+
+const parseSourceLine = (line) => {
+  const body = line.replace(SOURCE_LINE_RE, '').trim();
+
+  const catalog = body.match(/catalog\.json\s*\(([^)]*)\)/i);
+  if (catalog) {
+    const attrs = {};
+    for (const pair of catalog[1].split(',')) {
+      const [key, ...rest] = pair.split('=');
+      if (key) attrs[key.trim()] = rest.join('=').trim();
+    }
+    const label = attrs.id ? idToTitle(attrs.id) : attrs.category ? idToTitle(attrs.category) : 'Catalog';
+    return [{ type: 'catalog', label, id: attrs.id || undefined, category: attrs.category || undefined }];
+  }
+
+  const urls = body.match(/https?:\/\/[^\s|]+/g) || [];
+  if (urls.length) {
+    const type = /ask-context/i.test(body) ? 'ask-context' : 'url';
+    return urls.map((url) => ({ type, label: prettifyFromUrl(url), url }));
+  }
+
+  const label = body.replace(/^(ask-context\.json|catalog\.json)\s*[—:-]*/i, '').trim();
+  return label ? [{ type: 'unknown', label: titleCase(label.slice(0, 40)) }] : [];
+};
+
+const normalizeStructuredSources = (list = []) =>
+  list
+    .map((entry) => {
+      const str = String(entry || '');
+      if (/^catalog\.json:/i.test(str)) {
+        const id = str.replace(/^catalog\.json:/i, '');
+        return { type: 'catalog', label: idToTitle(id), id };
+      }
+      const ask = str.match(/^ask-context\.json:(.*)$/i);
+      if (ask) {
+        const value = ask[1];
+        return /^https?:/i.test(value)
+          ? { type: 'ask-context', label: prettifyFromUrl(value), url: value }
+          : { type: 'ask-context', label: titleCase(value) };
+      }
+      if (/^https?:/i.test(str)) return { type: 'url', label: prettifyFromUrl(str), url: str };
+      return str ? { type: 'unknown', label: titleCase(str.slice(0, 40)) } : null;
+    })
+    .filter(Boolean);
+
+// A bare homepage/root URL (e.g. https://atb.tn/) is not a useful citation — drop it so
+// chips stay relevant ([Reclamation] [Contact] instead of [Reclamation] [Contact] [Atb]).
+const isUsefulSource = (source) => {
+  if (!source || !source.url) return true; // catalog / label-only chips always kept
+  try {
+    const path = new URL(source.url).pathname.replace(/\/+$/, '');
+    return path.length > 0;
+  } catch {
+    return true;
+  }
+};
+
+const dedupeSources = (sources = []) => {
+  const seen = new Set();
+  return sources.filter((source) => {
+    if (!isUsefulSource(source)) return false;
+    const key = source.url || `${source.type}:${source.label}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+// ── Helpful-link helper ──────────────────────────────────────────────────────
+// The widget no longer renders raw source chips. Instead it picks the single most
+// useful public ATB page/document from the parsed sources and offers one navigation
+// button. Sources stay on the message for debugging/audit; only the UI changes.
+const ATB_HOST_RE = /(^|\.)atb\.tn$/i;
+
+const isAllowedNavUrl = (url) => {
+  try {
+    const parsed = new URL(url);
+    return (parsed.protocol === 'https:' || parsed.protocol === 'http:') && ATB_HOST_RE.test(parsed.hostname);
+  } catch {
+    return false;
+  }
+};
+
+const isDocUrl = (url = '') => /\.(pdf|docx?|xlsx?|pptx?)(?:$|[?#])/i.test(url);
+
+// UI-only labelling (not retrieval). Small map for common ATB slugs; generic title-case
+// otherwise. Nothing here affects which evidence was retrieved.
+const KNOWN_PAGE_LABELS = {
+  'services-atbpay': 'ATB PAY',
+  atbpay: 'ATB PAY',
+  'services-banque': 'Services bancaires',
+  cartes: 'Cartes',
+  carte: 'Cartes',
+  reclamation: 'Réclamation',
+  contact: 'Contact',
+};
+
+const pageNameFromUrl = (url = '') => {
+  try {
+    const parsed = new URL(url);
+    const slug = (parsed.pathname.split('/').filter(Boolean).pop() || '')
+      .toLowerCase()
+      .replace(/\.[a-z0-9]+$/, '')
+      .replace(/[-_]?presentation$/, '');
+    if (!slug) return '';
+    if (/document|utile/.test(slug)) return '__DOCS__';
+    if (KNOWN_PAGE_LABELS[slug]) return KNOWN_PAGE_LABELS[slug];
+    return titleCase(slug.replace(/[-_]+/g, ' '));
+  } catch {
+    return '';
+  }
+};
+
+const linkHelperLabel = (url, isDoc, lang) => {
+  if (isDoc) return lang === 'fr' ? 'Ouvrir le document' : 'Open document';
+  const name = pageNameFromUrl(url);
+  if (name === '__DOCS__') return lang === 'fr' ? 'Ouvrir les documents utiles' : 'Open useful documents';
+  if (!name) return lang === 'fr' ? 'Ouvrir la page' : 'Open page';
+  return lang === 'fr' ? `Ouvrir la page ${name}` : `Open ${name} page`;
+};
+
+// FR/EN detection from the answer text (label localization only — user language == answer language).
+const detectAnswerLang = (text = '') =>
+  /\b(vous|pour|votre|num[eé]ro|adresse|r[eé]clamation|carte|compte|ouvrir|avec|les|des)\b|[éèàçêùîô]/i.test(text)
+    ? 'fr'
+    : 'en';
+
+// Pick the single best public page/document to offer. Returns null when only
+// catalog entries (no user-facing URL) or root/homepage URLs exist.
+const buildLinkHelper = (sources = [], lang = 'en') => {
+  const best = sources.find(
+    (source) =>
+      source.url &&
+      isAllowedNavUrl(source.url) &&
+      (source.type === 'ask-context' || source.type === 'url'),
+  );
+  if (!best) return null;
+  const isDoc = isDocUrl(best.url);
+  return {
+    label: linkHelperLabel(best.url, isDoc, lang),
+    url: best.url,
+    action: isDoc ? 'open_document' : 'navigate',
+    sourceType: best.type,
+    reason: best.label,
+    lang,
+  };
+};
+
+// Click behavior:
+//  - documents open in a new tab (project convention for PDFs)
+//  - PAGE links navigate the SAME tab. Never window.open / _blank for pages.
+// The widget lives in a cross-origin iframe on the ATB host page, so a direct
+// window.top.location navigation is usually sandbox-blocked (it throws). We therefore
+// ask the host content-script/loader — which is same-origin to the tab — to navigate,
+// and also attempt direct top navigation for standalone/non-sandboxed cases.
+export const openHelpfulLink = (linkHelper) => {
+  if (!linkHelper || !linkHelper.url || !isAllowedNavUrl(linkHelper.url)) return;
+  const { url } = linkHelper;
+
+  if (linkHelper.action === 'open_document') {
+    window.open(url, '_blank', 'noopener,noreferrer');
+    return;
+  }
+
+  // Page link → same tab only.
+  const embedded = typeof window !== 'undefined' && window.parent && window.parent !== window;
+  if (embedded) {
+    try {
+      window.parent.postMessage({ type: 'ATB_WIDGET_NAVIGATE_SAME_TAB', url }, '*');
+    } catch { /* bridge unavailable — fall through to direct nav */ }
+  }
+  try {
+    (window.top || window).location.href = url; // no-ops/throws if sandbox-blocked; bridge handles it
+  } catch { /* handled by the content-script bridge above */ }
+};
+
+// Split assistant text into { text (Source: lines removed), sources[] }.
+export const parseAssistantSources = (text = '') => {
+  const kept = [];
+  const sources = [];
+  for (const line of String(text || '').split(/\r?\n/)) {
+    if (SOURCE_LINE_RE.test(line)) sources.push(...parseSourceLine(line));
+    else kept.push(line);
+  }
+  const cleaned = kept.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { text: cleaned, sources: dedupeSources(sources) };
+};
+
 const isValidUrlLike = (value) =>
   typeof value === 'string' && (/^https?:\/\//i.test(value) || value.startsWith('/'));
 
@@ -449,7 +669,7 @@ const normalizeQuickActions = (response, downloadInfo) => {
 export function normalizeAgentResponse(response) {
   const data = response?.data || {};
   const downloadInfo = extractDownloadInfo(response);
-  const text = sanitizeAssistantText(firstString([
+  const rawText = sanitizeAssistantText(firstString([
     response?.assistantMessage,
     data?.assistantMessage,
     data?.ai?.assistantMessage,
@@ -461,8 +681,20 @@ export function normalizeAgentResponse(response) {
     response?.message,
   ]));
 
+  // Strip inline "Source:" lines into structured chips; fall back to structured
+  // response.sources (option A) when the text carried none.
+  const { text, sources: parsedSources } = parseAssistantSources(rawText);
+  const structured = Array.isArray(response?.sources) ? response.sources
+    : Array.isArray(data?.sources) ? data.sources : [];
+  const sources = parsedSources.length ? parsedSources : normalizeStructuredSources(structured);
+
+  // One user-facing navigation helper replaces the raw source chips (kept internally).
+  const linkHelper = buildLinkHelper(sources, detectAnswerLang(text));
+
   return {
     text,
+    sources,
+    linkHelper,
     quickActions: normalizeQuickActions(response, downloadInfo),
     downloadUrl: downloadInfo.downloadUrl
       ? toAbsoluteBackendUrl(downloadInfo.downloadUrl)

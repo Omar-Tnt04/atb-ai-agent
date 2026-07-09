@@ -329,6 +329,8 @@ function ChatWidget() {
 
   const appendAssistantMessage = ({
     text,
+    sources = [],
+    linkHelper = null,
     quickActions = [],
     isError = false,
     actionContext = null,
@@ -336,6 +338,8 @@ function ChatWidget() {
     animate = false,
   }) => {
     const botMessage = createMessage('bot', text || UI_TEXT.fallback, {
+      sources,
+      linkHelper,
       quickActions,
       isError,
       actionContext,
@@ -404,6 +408,8 @@ function ChatWidget() {
   const appendNormalizedAssistantResponse = (response) => {
     appendAssistantMessage({
       text: response.text || text.fallback,
+      sources: response.sources || [],
+      linkHelper: response.linkHelper || null,
       quickActions: response.quickActions,
       actionContext: response.actionContext,
       animate: true,

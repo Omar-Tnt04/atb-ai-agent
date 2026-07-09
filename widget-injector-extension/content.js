@@ -949,6 +949,17 @@
         return;
       }
 
+      // Bridge: widget asks the host tab to navigate in-place to a public ATB page.
+      // Reuses atbClassifyHref → only same-domain internal pages (https, no forbidden
+      // login/payment/js/data URLs) are allowed. Updates the current tab, no new tab.
+      if (message.type === 'ATB_WIDGET_NAVIGATE_SAME_TAB') {
+        var navCls = atbClassifyHref(message.url);
+        if (navCls.kind === 'internal') {
+          location.assign(navCls.url);
+        }
+        return;
+      }
+
       // Bridge: widget asks content.js to save pending-job state in atb.tn localStorage.
       if (message.type === 'ATB_WIDGET_SAVE_BRIDGE') {
         try {

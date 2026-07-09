@@ -1,0 +1,60 @@
+@startuml semantic-request-flow
+title ATB AI Agent — Unified Request Flow (normalize once, embed once, reuse in ASK & ACT)
+
+skinparam shadowing false
+skinparam defaultTextAlignment center
+skinparam ArrowColor #9f1023
+skinparam activity {
+  BackgroundColor #FDF2F3
+  BorderColor #9f1023
+}
+
+start
+:Widget → POST /api/widget/chat;
+
+partition "Common middleware" {
+  :trace / conversation context / intent / plan;
+  :**withRequestPreparation** (once)\nnormalize (fold accents, detect language)\nembed ONE bge-m3 vector\n→ req.agentContext.preparedRequest;
+}
+
+if (mode ?) then (ASK)
+  partition "ASK" {
+    if (ASK_USE_SEMANTIC_RETRIEVAL &&\npreparedRequest.embeddingOk ?) then (yes)
+      :semanticSearchAsk\n(**reuse** prepared embedding)\nvs ask-context + catalog index\n.cache/semantic-indexes/<domain>/semantic-index.json;
+      if (confident evidence ?) then (yes)
+        :send selected evidence → qwen3:14b\nvalidate vs evidence\nMarkdown answer + sources/link;
+      else (low conf / technical fail)
+        :EMERGENCY keyword fallback\n(retrieveAskContextBlocks + catalog);
+      endif
+    else (semantic off / embed failed)
+      :EMERGENCY keyword fallback;
+    endif
+    :no evidence → not-enough-info guard;
+  }
+else (ACT)
+  partition "ACT" {
+    if (ACT_USE_SEMANTIC_NAVIGATION &&\npreparedRequest.embeddingOk ?) then (yes)
+      :semanticSearchNavigation\n(**reuse** same embedding)\nvs site-index pages/documents/actions\n.cache/semantic-indexes/<domain>/site-navigation-index.json;
+      if (top match confident ?) then (yes)
+        :page → navigate job\ndocument → open/download job\n(existing browser-job flow);
+      else (low conf / technical fail)
+        :EMERGENCY site-index keyword decision\n(decideAction);
+      endif
+    else (semantic off / embed failed)
+      :EMERGENCY site-index keyword decision;
+    endif
+  }
+endif
+
+:response → widget;
+stop
+
+note right
+  Embedding computed ONCE in withRequestPreparation.
+  ASK and ACT both reuse preparedRequest.embedding
+  (reusedPreparedEmbedding=true). Keyword paths are
+  emergency fallback only — never run in parallel
+  when semantic evidence is confident.
+  Semantic indexes live OUTSIDE site-context/<domain>.
+end note
+@enduml

@@ -4247,13 +4247,14 @@ const runLiveBugRegressionTests = async () => {
 
 // Live-path regressions for specific-field card questions and the branch directory, exercised
 // through buildResourceResponseWriterResponse (the resource-first answer builder that
-// handleChatMessage calls). The writer is stubbed to prove compact trusted facts drive the final
-// natural answer instead of backend field-dump templates.
+// handleChatMessage calls). Specific trusted facts should produce compact natural answers
+// deterministically, without requiring the qwen writer.
 const runSpecificFieldResourceAnswerTests = async () => {
   const req = { user: { id: 'user_client_001', role: 'CLIENT' } };
   const trace = { requestId: 'test-specific-field', threadId: 'test-thread' };
   const originalPost = axios.post;
   const writerPayloads = [];
+  const responseResults = [];
 
   axios.post = async (url, payload) => {
     assert(String(url).endsWith('/agent/analyze'));
@@ -4320,6 +4321,7 @@ const runSpecificFieldResourceAnswerTests = async () => {
       responseStyle: chatControllerPrivate.RESPONSE_STYLES.RESOURCE_QUESTION_ANSWER,
       writerMode: 'resource_qa',
     });
+    responseResults.push(result);
     return result?.assistantMessage || '';
   };
 
@@ -4343,11 +4345,6 @@ const runSpecificFieldResourceAnswerTests = async () => {
     assert(!paymentDue.includes('1735.250 TND'), 'case 2: must not dump available limit');
 
     const stillPay = await answerFor('Do I still have to pay something for my card this month?', cardContext);
-    assert.strictEqual(
-      writerPayloads[2].agentContext.resourceResponseWriter.selectedResource.title,
-      'Credit Card Limit Notice',
-      'case 2b: still-pay answer writer should receive Credit Card Limit Notice',
-    );
     assert.strictEqual(
       stillPay,
       'Yes. You need to pay at least **120.000 TND** by **2026-06-10** for card **************1122**.',
@@ -4390,18 +4387,21 @@ const runSpecificFieldResourceAnswerTests = async () => {
     const branches = await answerFor('What branches are available in Tunis?', branchContext);
     assert.strictEqual(
       branches,
-      'In Tunis, there are **4 branches** available. The default appointment branch is **Tunis Centre**, and support is available at **71 000 000**.',
+      'The **Tunis** region has **4 branches** available. The nearest/default appointment branch is **Tunis Centre**. Support phone: **71 000 000**.',
       `case 3: branch directory answer, got: ${JSON.stringify(branches)}`,
     );
-    assert.strictEqual(writerPayloads.length, 8, 'specific-field tests should call the writer for every answer');
-    assert.strictEqual(
-      writerPayloads[0].agentContext.resourceResponseWriter.trustedFacts.availableLimit,
-      '1735.250 TND',
-    );
-    assert.strictEqual(
-      writerPayloads[7].agentContext.resourceResponseWriter.trustedFacts.branchCount,
-      '4',
-    );
+    // Trusted deterministic narrowed answers intentionally bypass the qwen writer:
+    // the backend can answer directly from exact catalog fields, avoids model drift,
+    // and still returns the normal resource route envelope.
+    assert.strictEqual(writerPayloads.length, 0, 'specific trusted answers should not require qwen writer calls');
+    assert.strictEqual(responseResults.length, 8, 'specific-field tests should return every answer');
+    for (const result of responseResults) {
+      assert.strictEqual(result?.data?.ai?.routerDecision?.case, CASES.LARAGON_RESOURCE_METADATA);
+      assert(
+        ['trusted_deterministic', 'finalizer_guard'].includes(result?.data?.ai?.finalAnswerSource),
+        `trusted deterministic answer source expected, got ${result?.data?.ai?.finalAnswerSource}`,
+      );
+    }
   } finally {
     axios.post = originalPost;
   }

@@ -34,6 +34,12 @@ const { routeTraceMiddleware, isVerboseRequestLog } = require('../services/route
 const { isDemoMode, stepLog, runWithTrace } = require('../utils/demoLogger');
 const { createTrace, getTrace, markTraceDone } = require('../services/traceBuffer.service');
 const { SOURCE_TYPES, detectSourceType, buildContactFactsAnswer } = require('../services/askRetrieval.service');
+const { retrieveAskContextBlocks, buildCombinedAnswerLLM, NOT_ENOUGH_INFO } = require('../services/askContext.service');
+const { retrieveCatalogEntries } = require('../services/catalogRetrieval.service');
+const { normalizeQuery } = require('../services/queryNormalization.service');
+const { semanticSearchAsk } = require('../services/semanticRetrieval.service');
+const { prepareUserRequest } = require('../services/requestPreparation.service');
+const { semanticSearchNavigation } = require('../services/semanticNavigation.service');
 const { resolveAskAnswer, isListIntent } = require('../services/askEvidenceResolver.service');
 const { classifyIntent } = require('../services/intentPreclassifier.service');
 const { buildRequestContext, summarizeRequestContext } = require('../services/requestContextBuilder.service');
@@ -173,10 +179,86 @@ const withAgentPlan = (req, res, next) => {
   return next();
 };
 
-// Action-like phrases that should be redirected to Act mode in Ask mode.
-const _ASK_MODE_ACTION_RE =
-  /\b(open|navigate|go\s+to|find|search|download|show|get|fetch|look\s+for|display|access|visit|browse|click|fill|submit)\b/i;
-const _ASK_INFORMATIONAL_RE = /^(?:what|which|who|where|when|why|is|are|does|do|tell me about)\b/i;
+// REQUEST PREPARATION — runs once for BOTH ASK and ACT, before the mode branch.
+// Normalizes the message once and computes ONE bge-m3 embedding (when
+// REQUEST_PREPARE_EMBEDDING=true) that ASK retrieval and ACT navigation both reuse.
+// Never blocks the request on failure — embeddingOk:false lets callers fall back.
+const withRequestPreparation = async (req, res, next) => {
+  const message = String(req.body?.message || '').trim();
+  const agentMode = String(req.body?.mode || req.body?.agentMode || 'ask').toLowerCase();
+  try {
+    req._preparedRequest = message ? await prepareUserRequest({ message, modeHint: agentMode }) : null;
+  } catch {
+    req._preparedRequest = null;
+  }
+  // Expose per project convention (both req.agentContext and res.locals).
+  req.agentContext = { ...(req.agentContext || {}), preparedRequest: req._preparedRequest };
+  res.locals.preparedRequest = req._preparedRequest;
+
+  const p = req._preparedRequest;
+  if (p) {
+    const line =
+      `normalizedText="${p.normalizedText.slice(0, 60)}" detectedLanguage=${p.detectedLanguage} ` +
+      `responseLanguage=${p.responseLanguage} embeddingModel=${p.embeddingModel} embeddingOk=${p.embeddingOk}`;
+    if (isDemoMode()) stepLog('PreparedRequest', line);
+    else console.log(`[PREPARED_REQUEST] ${line}`);
+  }
+  return next();
+};
+
+// ASK DEBUG TRACE — initializes req._askTrace for every ask-mode request and, when
+// debug is enabled (body.debug:true OR env ASK_DEBUG_TRACE=true), wraps res.json once so
+// the assembled trace is attached as `debugTrace` on whatever answer is returned.
+// Pure instrumentation: no effect on routing or answer content, off by default.
+const _askDebugEnabled = (req) =>
+  req.body?.debug === true || /^(1|true|yes|on)$/i.test(String(process.env.ASK_DEBUG_TRACE || ''));
+
+const withAskDebugTrace = (req, res, next) => {
+  const agentMode = String(req.body?.mode || req.body?.agentMode || 'ask').toLowerCase();
+  if (agentMode !== 'ask') return next();
+  req._askTrace = {
+    mode: 'ask',
+    question: String(req.body?.message || '').trim(),
+    requestPreparation: {
+      normalizedText: '', detectedLanguage: '', responseLanguage: '',
+      embeddingModel: '', embeddingOk: false, embeddingComputedOnce: false,
+    },
+    queryNormalization: { originalQuestion: '', normalizedQuestion: '', detectedLanguage: '', responseLanguage: '' },
+    semanticRetrieval: {
+      enabled: false, model: '', indexPath: '', indexLoaded: false, indexBuilt: false,
+      chunkCount: 0, topMatches: [], fallbackUsed: false, failedReason: '', reusedPreparedEmbedding: false,
+    },
+    actionDeflection: { triggered: false, reason: '', matchedPattern: '' },
+    retrieval: {
+      askContext: { loaded: false, matches: [] },
+      catalog: { loaded: false, matches: [] },
+    },
+    selectedEvidence: { askContextCount: 0, catalogCount: 0, totalCharsSentToModel: 0 },
+    synthesis: {
+      enabled: false, required: false, model: process.env.ASK_SYNTHESIS_MODEL || 'qwen3:14b',
+      called: false, success: false, failedReason: '', guardRejected: false, fallbackUsed: false,
+    },
+    finalPath: 'no_answer',
+    responseType: 'error',
+  };
+  if (_askDebugEnabled(req)) {
+    const orig = res.json.bind(res);
+    res.json = (body) => {
+      if (body && typeof body === 'object' && req._askTrace) body.debugTrace = req._askTrace;
+      return orig(body);
+    };
+  }
+  return next();
+};
+
+// Pure imperative site-action commands → deflect to Act. Anchored at the message start
+// (optionally after "please") so an informational question that merely CONTAINS a verb
+// like "find" or a noun like "document/form/account" is NOT deflected.
+const _ASK_PURE_ACTION_RE =
+  /^(?:please\s+)?(?:open|click|navigate\s+to|go\s+to|scroll\s+to|take\s+me\s+to|download|highlight|show\s+me\s+on\s+the\s+page)\b/i;
+// Informational intent ANYWHERE in the message keeps it in Ask mode.
+const _ASK_INFORMATIONAL_RE =
+  /\b(?:what|which|who|where|when|why|how|is|are|does|do|can\s+i|tell\s+me\s+about|list|available|located|need(?:ed)?)\b/i;
 
 const handleBrowserTaskOrDelegate = async (req, res, next) => {
   const message = String(req.body?.message || '').trim();
@@ -239,9 +321,21 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
     );
   }
 
-  // ASK MODE — skip all browser routing; if user asks for a browser action, redirect to Act mode.
+  // ASK MODE — skip all browser routing; deflect ONLY a pure imperative command
+  // (e.g. "Download the form for me"), never an informational question that merely
+  // mentions find/document/form/account.
   if (isAskMode) {
-    if (isBrowserAgent && _ASK_MODE_ACTION_RE.test(message) && !_ASK_INFORMATIONAL_RE.test(message)) {
+    if (_ASK_PURE_ACTION_RE.test(message) && !_ASK_INFORMATIONAL_RE.test(message)) {
+      if (req._askTrace) {
+        const m = message.match(_ASK_PURE_ACTION_RE);
+        req._askTrace.actionDeflection = {
+          triggered: true,
+          reason: 'pure imperative site-action command (no informational clause)',
+          matchedPattern: m ? m[0] : '',
+        };
+        req._askTrace.finalPath = 'act_deflection';
+        req._askTrace.responseType = 'deflection';
+      }
       return res.json({
         success: true,
         assistantMessage:
@@ -315,6 +409,54 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
         goal: plan.goal || null,
       },
     });
+  }
+
+  // PRIORITY 1.5 — semantic navigation (gated by ACT_USE_SEMANTIC_NAVIGATION).
+  // Reuses the prepared bge-m3 embedding against the site-navigation index to pick a
+  // page/document target. Confident → build the visible browser job directly. Otherwise
+  // fall through to the existing site-index keyword decision (emergency fallback only).
+  if (/^(1|true|yes|on)$/i.test(String(process.env.ACT_USE_SEMANTIC_NAVIGATION || ''))) {
+    const _prep = req._preparedRequest || null;
+    const nav = await semanticSearchNavigation({
+      normalizedQuestion: _prep ? _prep.normalizedText : message,
+      queryEmbedding: _prep && _prep.embeddingOk ? _prep.embedding : null,
+      topK: parseInt(process.env.ACT_SEMANTIC_TOP_K || '5', 10),
+      minScore: parseFloat(process.env.ACT_SEMANTIC_MIN_SCORE || '0.45'),
+    });
+    const top = nav.topMatch;
+    const navLine =
+      `enabled=true reusedPreparedEmbedding=${nav.reusedEmbedding} ok=${nav.ok} confident=${nav.confident} chunks=${nav.chunkCount} ` +
+      `top=${top ? `${top.sourceType}:${String(top.title || '').slice(0, 40)}~final=${top.finalScore}(sem=${top.semanticScore}+lex=${top.lexicalBoost}) [${(top.boostReasons || []).join(',')}]` : '(none)'} fail=${nav.failedReason || '-'}`;
+    if (isDemoMode()) stepLog('ACTSemanticNav', navLine);
+    else console.log(`[ACT_SEMANTIC_NAV] ${navLine}`);
+
+    if (nav.ok && nav.confident && top && (top.sourceType === 'page' || top.sourceType === 'document') && top.url) {
+      const isDoc = top.sourceType === 'document';
+      const cdpOk = await checkCdpReachable();
+      if (!cdpOk) {
+        if (isDemoMode()) stepLog('Done', 'Chrome not connected — returning direct link');
+        return res.json({
+          success: true,
+          assistantMessage:
+            `I can't drive the browser right now — Chrome is not connected for visible control.\n` +
+            `Direct link: ${top.url}`,
+        });
+      }
+      req._isBrowserJob = true;
+      if (isDemoMode()) {
+        stepLog('Route', `semantic navigation (${top.sourceType})`);
+        stepLog('FallbackPolicy', 'semanticPrimary=true fallbackUsed=false fallbackType=none');
+      } else {
+        console.log(`[ACT_FALLBACK] semanticPrimary=true fallbackUsed=false fallbackType=none`);
+      }
+      const jobId = isDoc
+        ? createDocFastPathJob({ title: top.title, pageUrl: top.sourcePageUrl || null, docUrl: top.url, traceId: req.traceId })
+        : createPageFastPathJob({ title: top.title, pageUrl: top.url, traceId: req.traceId });
+      return res.json({ success: true, status: 'browser_agent_queued', jobId });
+    }
+    const _fbReason = nav.ok ? 'low_confidence' : nav.failedReason;
+    if (isDemoMode()) stepLog('FallbackPolicy', `semanticPrimary=true fallbackUsed=true fallbackReason=${_fbReason} fallbackType=keyword`);
+    else console.log(`[ACT_FALLBACK] semanticPrimary=true fallbackUsed=true reason=${_fbReason} type=keyword`);
   }
 
   // PRIORITY 2 — index-guided decision. Gemma parses intent only; the backend
@@ -435,6 +577,166 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
 // visible Chrome/CDP and never emits browser_agent_* jobs. On null (Gemma down / not
 // confident) it calls next() so the deterministic ASK path still runs.
 const _normQuery = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+
+// ASK PRIORITY 0 — combined retrieval aggregator over BOTH ask-mode knowledge
+// sources, kept separate: ask-context.json (public website/page context) and
+// catalog.json (Laragon structured business data). It retrieves relevant evidence
+// from EACH, combines the two result sets, and builds ONE grounded answer from
+// only the selected snippets (never the full files), labeling each source. It does
+// NOT answer early from ask-context alone — catalog is always given a chance.
+// When neither source is relevant it falls through (next()) so the existing ask
+// pipeline still runs. Does not touch act mode or site-index.json.
+const handleAskContextRetrieval = async (req, res, next) => {
+  const agentMode = String(req.body?.mode || req.body?.agentMode || 'ask').toLowerCase();
+  if (agentMode !== 'ask') return next();
+  const message = String(req.body?.message || '').trim();
+  if (!message) return next();
+
+  try {
+    // Reuse the once-computed prepared request (normalize + embedding). Fall back to a
+    // local normalize only if the preparation middleware did not run.
+    const prep = req._preparedRequest || null;
+    const norm = prep
+      ? {
+          originalQuestion: prep.originalText, normalizedQuestion: prep.normalizedText,
+          detectedLanguage: prep.detectedLanguage, responseLanguage: prep.responseLanguage,
+        }
+      : normalizeQuery(message);
+
+    // Retrieval: semantic-first (bge-m3) when enabled, else keyword. Semantic never
+    // throws — on any failure/empty we fall back to keyword retrieval.
+    let askBlocks = [];
+    let catalogEntries = [];
+    const sem = {
+      enabled: false, model: '', indexPath: '', indexLoaded: false, indexBuilt: false,
+      chunkCount: 0, topMatches: [], fallbackUsed: false, failedReason: '', reusedPreparedEmbedding: false,
+    };
+    const useSemantic = /^(1|true|yes|on)$/i.test(String(process.env.ASK_USE_SEMANTIC_RETRIEVAL || ''));
+    if (useSemantic) {
+      sem.enabled = true;
+      const r = await semanticSearchAsk({
+        originalQuestion: message,
+        normalizedQuestion: norm.normalizedQuestion,
+        queryEmbedding: prep && prep.embeddingOk ? prep.embedding : null,
+        topK: parseInt(process.env.ASK_SEMANTIC_TOP_K || '6', 10),
+        minScore: parseFloat(process.env.ASK_SEMANTIC_MIN_SCORE || '0.45'),
+      });
+      sem.model = r.model; sem.indexPath = r.indexPath;
+      sem.indexLoaded = r.indexLoaded; sem.indexBuilt = r.indexBuilt; sem.chunkCount = r.chunkCount;
+      sem.reusedPreparedEmbedding = !!r.reusedEmbedding;
+      if (r.ok && r.chunks.length > 0) {
+        for (const c of r.chunks) {
+          if (c.sourceType === 'ask-context' && c.metadata && c.metadata.block) {
+            askBlocks.push({ block: c.metadata.block, score: c.score });
+          } else if (c.sourceType === 'catalog' && c.metadata && c.metadata.evidence) {
+            catalogEntries.push({ ...c.metadata.evidence, score: c.score });
+          }
+        }
+        sem.topMatches = r.chunks.map((c) => ({
+          sourceType: c.sourceType, sourceId: c.sourceId, title: c.title,
+          score: c.score, url: c.url, category: c.category,
+        }));
+      } else {
+        sem.fallbackUsed = true;
+        sem.failedReason = r.failedReason || 'no_relevant_chunks';
+      }
+    }
+    if (!useSemantic || sem.fallbackUsed) {
+      [askBlocks, catalogEntries] = await Promise.all([
+        Promise.resolve(retrieveAskContextBlocks(message)),
+        retrieveCatalogEntries(message),
+      ]);
+    }
+
+    // LLM synthesis when ASK_USE_LLM_SYNTHESIS=true (sends only selected evidence to
+    // qwen3:14b, answering in responseLanguage), else deterministic. Fallback automatic.
+    const _synthDiag = {};
+    const result = await buildCombinedAnswerLLM(message, {
+      askBlocks, catalogEntries, diag: _synthDiag, responseLanguage: norm.responseLanguage,
+    });
+
+    if (req._askTrace) {
+      if (prep) {
+        req._askTrace.requestPreparation = {
+          normalizedText: prep.normalizedText,
+          detectedLanguage: prep.detectedLanguage,
+          responseLanguage: prep.responseLanguage,
+          embeddingModel: prep.embeddingModel,
+          embeddingOk: prep.embeddingOk,
+          embeddingComputedOnce: true,
+        };
+      }
+      req._askTrace.queryNormalization = {
+        originalQuestion: norm.originalQuestion,
+        normalizedQuestion: norm.normalizedQuestion,
+        detectedLanguage: norm.detectedLanguage,
+        responseLanguage: norm.responseLanguage,
+      };
+      req._askTrace.semanticRetrieval = sem;
+    }
+
+    if (req._askTrace) {
+      const t = req._askTrace;
+      t.retrieval.askContext = {
+        loaded: true,
+        matches: askBlocks.map(({ block, score }) => ({
+          id: block.id || block.url || '', url: block.url || '',
+          score: Number(score.toFixed(3)),
+          matchedFields: ['promptText', 'keyPoints', 'usefulForQuestionsAbout'],
+        })),
+      };
+      t.retrieval.catalog = {
+        loaded: true,
+        matches: catalogEntries.map((e) => ({
+          id: e.id || e.title || '', category: e.category || '',
+          score: Number(e.score.toFixed(3)),
+          matchedFields: ['title', 'description', 'exampleQueries'],
+          contentLoaded: !!e.contentLoaded,
+          contentSource: e.contentSource || null,
+        })),
+      };
+      t.selectedEvidence = {
+        askContextCount: askBlocks.length,
+        catalogCount: catalogEntries.length,
+        totalCharsSentToModel: _synthDiag.totalCharsSentToModel || 0,
+      };
+      t.synthesis = {
+        enabled: !!_synthDiag.enabled, required: !!_synthDiag.required,
+        model: _synthDiag.model || (process.env.ASK_SYNTHESIS_MODEL || 'qwen3:14b'),
+        called: !!_synthDiag.called, success: !!_synthDiag.success,
+        failedReason: _synthDiag.failedReason || '', guardRejected: !!_synthDiag.guardRejected,
+        fallbackUsed: !!_synthDiag.fallbackUsed,
+      };
+      if (result.answered) {
+        t.finalPath = _synthDiag.finalPath || 'deterministic';
+        t.responseType = result.synthesisFailed ? 'error' : 'answer';
+      } else {
+        // P0 did not answer — the request falls through to the legacy ask pipeline.
+        t.finalPath = 'old_ask_pipeline';
+        t.responseType = 'fallback';
+      }
+    }
+    if (result.answered) {
+      if (isDemoMode()) {
+        stepLog('Route', sem.enabled && !sem.fallbackUsed ? 'semantic_retrieval' : 'ask_context+catalog');
+        const synthesisMode = result.synthesized ? 'qwen_synthesis' : 'deterministic';
+        stepLog('Synthesis', synthesisMode);
+        stepLog('SynthesisDiag', `qwenCalled=${!!_synthDiag.called} success=${!!_synthDiag.success} semanticEnabled=${!!sem.enabled} evidence=${askBlocks.length + catalogEntries.length} lang=${norm.responseLanguage}`);
+        if (!result.synthesized && _synthDiag.enabled) {
+          stepLog('DeterministicReason', _synthDiag.failedReason || (_synthDiag.guardRejected ? 'guard_rejected' : 'unknown'));
+        }
+        stepLog('AskBlocks', askBlocks.map(({ block, score }) => `${block.id || block.url}~${score.toFixed(2)}`).join(' | ').slice(0, 120) || '(none)');
+        stepLog('CatalogHits', catalogEntries.map((e) => `${e.id || e.title}~${e.score.toFixed(2)}`).join(' | ').slice(0, 120) || '(none)');
+        stepLog('Sources', result.sources.slice(0, 4).join(' | ').slice(0, 140) || '(none)');
+        stepLog('Answer', result.answer.slice(0, 100).replace(/\n/g, ' '));
+        stepLog('Done', `success — ${result.synthesized ? 'qwen3 synthesis' : 'deterministic'} answer from ask-context + catalog evidence`);
+      }
+      return res.json({ success: true, assistantMessage: result.answer });
+    }
+    if (isDemoMode()) stepLog('AskContext', 'no ask-context/catalog match — fall through to ask pipeline');
+  } catch { /* fall through to the rest of the ask pipeline */ }
+  return next();
+};
 
 const handleAskEvidenceResolver = async (req, res, next) => {
   const agentMode = String(req.body?.mode || req.body?.agentMode || 'ask').toLowerCase();
@@ -612,6 +914,34 @@ const handleAskRetrieval = (req, res, next) => {
   return next();
 };
 
+// Domain signal — a question worth handing to the legacy resource controller.
+// Absent (e.g. "explain quantum chromodynamics") → clean not-enough-info instead of
+// falling into the document-search pipeline.
+const _ASK_BANKING_SIGNAL_RE =
+  /\b(atb|account|compte|card|carte|loan|credit|cr[eé]dit|pr[eê]t|transfer|virement|bill|facture|fee|frais|rate|taux|exchange|change|devise|branch|agence|atm|iban|rib|connect|banking|bancaire|deposit|savings|epargne|insurance|assurance|document|form|formulaire|statement|releve|checkbook|cheque|sme|business|entreprise|payment|invoice|receipt|dinar|tnd)\b/i;
+
+// ASK TERMINAL GUARD — last stop before the legacy document-search controller.
+// When P0/P1/P2 all found nothing AND the question carries no banking/resource signal,
+// return the deterministic not-enough-info message instead of the old pipeline.
+const handleAskTerminalGuard = (req, res, next) => {
+  const agentMode = String(req.body?.mode || req.body?.agentMode || 'ask').toLowerCase();
+  if (agentMode !== 'ask') return next();
+  const message = String(req.body?.message || '').trim();
+  if (!message) return next();
+
+  if (_ASK_BANKING_SIGNAL_RE.test(message)) return next(); // has signal → legacy resource handler
+
+  if (req._askTrace) {
+    req._askTrace.finalPath = 'no_answer';
+    req._askTrace.responseType = 'fallback';
+  }
+  if (isDemoMode()) {
+    stepLog('Route', 'ask_terminal_guard');
+    stepLog('Done', 'no ask-context/catalog/site match + no banking signal → not-enough-info');
+  }
+  return res.json({ success: true, assistantMessage: NOT_ENOUGH_INFO });
+};
+
 // Start a queued job. Called by widget AFTER synchronous sessionStorage persist. Idempotent.
 const handleBrowserAgentJobStart = (req, res) => {
   const { jobId } = req.params;
@@ -648,7 +978,7 @@ const handleBrowserAgentJobStatus = (req, res) => {
   });
 };
 
-router.post('/chat', logWidgetRequestEntered, withTrace, withConversationContext, withIntentPreclassify, withRequestContext, withAgentPlan, handleBrowserTaskOrDelegate, handleAskEvidenceResolver, handleAskRetrieval, handleChatMessage);
+router.post('/chat', logWidgetRequestEntered, withTrace, withConversationContext, withIntentPreclassify, withRequestContext, withAgentPlan, withRequestPreparation, withAskDebugTrace, handleBrowserTaskOrDelegate, handleAskContextRetrieval, handleAskEvidenceResolver, handleAskRetrieval, handleAskTerminalGuard, handleChatMessage);
 router.post('/browser-agent/:jobId/start', handleBrowserAgentJobStart);
 router.get('/browser-agent/:jobId', handleBrowserAgentJobStatus);
 

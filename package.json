@@ -41,7 +41,8 @@
     "site:context": "node scripts/build-site-context.js",
     "site:context:atb": "node scripts/build-site-context.js --url https://atb.tn --out site-context/atb.tn/context.json",
     "site:context:validate": "node scripts/validate-site-context.js site-context/atb.tn/context.json",
-    "test:site-context": "node scripts/tests/site-context.test.js"
+    "test:site-context": "node scripts/tests/site-context.test.js",
+    "capture:export": "node scripts/export-playwright-capture.js"
   },
   "repository": {
     "type": "git",

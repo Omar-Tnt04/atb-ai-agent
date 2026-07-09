@@ -743,6 +743,16 @@
         return;
       }
 
+      // Helpful-link bridge: navigate the current host tab in-place to a public ATB page.
+      // atbClassifyHref allows only same-domain internal pages (https, no forbidden URLs).
+      if (message.type === 'ATB_WIDGET_NAVIGATE_SAME_TAB') {
+        var navCls = atbClassifyHref(message.url);
+        if (navCls.kind === 'internal') {
+          location.assign(navCls.url);
+        }
+        return;
+      }
+
       var isClosedMessage =
         message === 'ATB_WIDGET_CLOSED' ||
         (message.type === 'atb-widget:resize' && message.state === 'closed');

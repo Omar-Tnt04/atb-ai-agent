@@ -6170,7 +6170,7 @@ const hasMeaningfulBoldMarkdown = (value = '') =>
   /\*\*[^*\n]\*\*/.test(String(value || ''));
 
 const escapeMarkdownBoldValue = (value = '') =>
-  String(value || '').replace(/\*/g, '\\*');
+  String(value || '');
 
 const boldExactPlainText = (text = '', value = '') => {
   const target = String(value || '').trim();

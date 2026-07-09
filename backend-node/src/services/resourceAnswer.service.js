@@ -167,7 +167,7 @@ const boldValue = (value) => {
 
 const boldMarkdownValue = (value) => {
   const formatted = formatValue(value);
-  return formatted ? `**${formatted.replace(/\*/g, '\\*')}**` : null;
+  return formatted ? `**${formatted}**` : null;
 };
 
 const buildAtbConnectAnswer = (resourceJson = {}, message = '') => {
@@ -191,10 +191,14 @@ const buildAtbConnectAnswer = (resourceJson = {}, message = '') => {
     }
   }
 
+  const steps = Array.isArray(stepsRaw)
+    ? stepsRaw.map(formatValue).filter(Boolean)
+    : formatValue(stepsRaw).split(/[,;]/).map((step) => step.trim()).filter(Boolean);
   const lines = [
     `**${title}**`,
     activationChannel ? line('Activation channel', activationChannel) : null,
     requiredId ? line('Required ID', requiredId) : null,
+    steps.length ? line('Steps', steps.join(', ')) : null,
     supportChannel ? line('Support', supportChannel) : null,
   ].filter(Boolean);
 

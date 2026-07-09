@@ -1,0 +1,1794 @@
+{
+  "meta": {
+    "version": "1.0",
+    "purpose": "ask_mode_context",
+    "targetUrl": "https://atb.tn",
+    "domain": "atb.tn",
+    "generatedAt": "2026-07-05T18:36:08Z",
+    "generator": "chatgpt_audited_from_playwright_capture",
+    "sourceCapture": "capture-package(1).zip"
+  },
+  "siteBrief": {
+    "summary": "Public website of Arab Tunisian Bank (ATB / البنك العربي لتونس), a Tunisian retail and business bank. Presents accounts, cards, credits (loans), savings, placements, remote banking (ATB Connect, Mobilink, Messenger, ATB PAY), foreign exchange, branch network, recruitment, downloadable forms, and contact channels, in French and Arabic. No authenticated/transactional pages were captured (read-only public capture).",
+    "mainThemes": [
+      "Retail banking products: comptes, cartes, épargne, crédits, packs",
+      "Financing / crédits (Sakan, ATBAWALSAKAN, Tahawel, Sayara, Mounassib, Start, Renov, Bien Être)",
+      "Remote banking & payment services (ATB Connect, Mobilink, Messenger, ATB PAY)",
+      "Foreign exchange and SICAV/placement rates",
+      "Branch network, contact, complaints and recruitment"
+    ],
+    "evidence": [
+      "Siège Social : 9 Rue Hédi Nouira - 1001 Tunis",
+      "Tél : 71 351 155",
+      "N° vert : 80 10 03 47",
+      "contact@atb.com.tn",
+      "05 juillet 2026 TMM (juin) = 6.99 %"
+    ]
+  },
+  "contextBlocks": [
+    {
+      "id": "home",
+      "type": "page",
+      "url": "https://atb.tn/",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "ATB homepage. Entry hub linking product families (Comptes, Cartes, Crédits, Epargne, Placements) and services (transfert d'argent, change, gestion de portefeuille, FATCA, assurance). Shows head-office addresses, phone numbers, email and latest news items. Useful as the bank's identity + contact anchor.",
+      "keyPoints": [
+        {
+          "point": "Head office address of ATB",
+          "evidence": "Siège Social : 9 Rue Hédi Nouira - 1001 Tunis"
+        },
+        {
+          "point": "A second head-office site is in Lac 2, Tunis",
+          "evidence": "Siège Lac 2 : Rue de la feuille d'érable lac 2 - Immeuble les Pins Bloc A - 1053 Tunis"
+        },
+        {
+          "point": "ATB main switchboard phone number is 71 351 155.",
+          "evidence": "Tél : 71 351 155"
+        },
+        {
+          "point": "ATB also shows a green/toll-free number: 80 10 03 47.",
+          "evidence": "N° vert : 80 10 03 47"
+        },
+        {
+          "point": "ATB offers low-cost money transfers",
+          "evidence": "Avec l’ATB vous pouvez envoyer de l’argent à vos proches rapidement et en toute confiance et ce au coût le plus bas sur le marché!"
+        },
+        {
+          "point": "ATB supports FATCA (US regulation) compliance for clients",
+          "evidence": "l'ATB donne la possibilité d’être conforme à la réglementation américaine FATCA ."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "what is ATB",
+        "ATB head office address",
+        "ATB phone number",
+        "ATB email",
+        "product and service overview"
+      ],
+      "notEnoughInfoFor": [
+        "account opening steps",
+        "specific fees/tariffs",
+        "product eligibility details"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TARIFS",
+          "url": "https://atb.tn/doc/tarifs-atb.pdf",
+          "filename": "tarifs-atb.pdf",
+          "fileType": "pdf"
+        },
+        {
+          "text": "ENGAGEMENT QUALITÉ",
+          "url": "https://atb.tn/doc/Normes-Delais.pdf",
+          "filename": "Normes-Delais.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/\nLanguage: fr\n\nContext summary:\nATB homepage. Entry hub linking product families (Comptes, Cartes, Crédits, Epargne, Placements) and services (transfert d'argent, change, gestion de portefeuille, FATCA, assurance). Shows head-office addresses, phone numbers, email and latest news items. Useful as the bank's identity + contact anchor.\n\nVerified key points:\n- Head office address of ATB Evidence: \"Siège Social : 9 Rue Hédi Nouira - 1001 Tunis\"\n- A second head-office site is in Lac 2, Tunis Evidence: \"Siège Lac 2 : Rue de la feuille d'érable lac 2 - Immeuble les Pins Bloc A - 1053 Tunis\"\n- ATB main switchboard phone number is 71 351 155. Evidence: \"Tél : 71 351 155\"\n- ATB also shows a green/toll-free number: 80 10 03 47. Evidence: \"N° vert : 80 10 03 47\"\n- ATB offers low-cost money transfers Evidence: \"Avec l’ATB vous pouvez envoyer de l’argent à vos proches rapidement et en toute confiance et ce au coût le plus bas sur le marché!\"\n- ATB supports FATCA (US regulation) compliance for clients Evidence: \"l'ATB donne la possibilité d’être conforme à la réglementation américaine FATCA .\"\n\nVisible/downloadable documents:\n- TARIFS — https://atb.tn/doc/tarifs-atb.pdf\n- ENGAGEMENT QUALITÉ — https://atb.tn/doc/Normes-Delais.pdf\n\nUseful for questions about:\n- what is ATB\n- ATB head office address\n- ATB phone number\n- ATB email\n- product and service overview\n\nNot enough information for:\n- account opening steps\n- specific fees/tariffs\n- product eligibility details",
+      "confidence": "high"
+    },
+    {
+      "id": "entreprises",
+      "type": "page",
+      "url": "https://atb.tn/entreprises",
+      "title": "ATB Business Center - le portail de l'entrepreneur et de l'entreprise",
+      "language": "fr",
+      "richContext": "Business/enterprise portal landing. Lists the same core products/services framed for companies, plus e-banking and branch finder. Mostly navigational; TMM rate shown.",
+      "keyPoints": [
+        {
+          "point": "ATB offers an online banking service for managing daily operations remotely",
+          "evidence": "Le service de banque en ligne qu'il vous faut ! L'ATB Offre à sa clientèle des solutions innovantes pour gérer leurs quotidien et à distance."
+        },
+        {
+          "point": "Money market reference rate (TMM) for June shown as 6.99%",
+          "evidence": "05 juillet 2026 TMM (juin) = 6.99 %"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB business/enterprise offering",
+        "current TMM rate"
+      ],
+      "notEnoughInfoFor": [
+        "specific enterprise product terms",
+        "business account fees"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TARIFS",
+          "url": "https://atb.tn/doc/tarifs-atb.pdf",
+          "filename": "tarifs-atb.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [
+        {
+          "action": "https://atb.tn/entreprises/nos-agences-en-tunisie",
+          "method": "post",
+          "fields": [
+            {
+              "name": "searchInput",
+              "type": "text",
+              "placeholder": "Trouver rapidement la liste des agences",
+              "label": ""
+            }
+          ]
+        }
+      ],
+      "promptText": "Page: ATB Business Center - le portail de l'entrepreneur et de l'entreprise\nURL: https://atb.tn/entreprises\nLanguage: fr\n\nContext summary:\nBusiness/enterprise portal landing. Lists the same core products/services framed for companies, plus e-banking and branch finder. Mostly navigational; TMM rate shown.\n\nVerified key points:\n- ATB offers an online banking service for managing daily operations remotely Evidence: \"Le service de banque en ligne qu'il vous faut ! L'ATB Offre à sa clientèle des solutions innovantes pour gérer leurs quotidien et à distance.\"\n- Money market reference rate (TMM) for June shown as 6.99% Evidence: \"05 juillet 2026 TMM (juin) = 6.99 %\"\n\nVisible/downloadable documents:\n- TARIFS — https://atb.tn/doc/tarifs-atb.pdf\n\nForms visible on page:\n- method=post action=https://atb.tn/entreprises/nos-agences-en-tunisie fields=Trouver rapidement la liste des agences\n\nUseful for questions about:\n- ATB business/enterprise offering\n- current TMM rate\n\nNot enough information for:\n- specific enterprise product terms\n- business account fees",
+      "confidence": "medium"
+    },
+    {
+      "id": "atb-finance",
+      "type": "page",
+      "url": "https://atb.tn/atb-finance",
+      "title": "ATB - Espace Finance",
+      "language": "fr",
+      "richContext": "Espace Finance page. Full sitemap-like product/service listing (accounts, cards, packs, transfers, savings, financing, e-banking, services) plus news about ATB's Espace Finance program supporting entrepreneurs and TPME.",
+      "keyPoints": [
+        {
+          "point": "ATB runs a 'Cycle Femmes Entrepreneures' program supporting female entrepreneurship",
+          "evidence": "L’ATB confirme son engagement en faveur de l'entrepreneuriat féminin en consacrant la troisième rencontre du programme Espace Finance..."
+        },
+        {
+          "point": "ATB provides exclusive support to TPME in partnership with Espace Finance",
+          "evidence": "L’ATB lance un accompagnement exclusif aux TPME en partenariat avec Espace Finance"
+        },
+        {
+          "point": "The page shows branch/public opening hours from 08h15 to 13h30.",
+          "evidence": "De 08h15 à 13h30"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB product catalog overview",
+        "Espace Finance / entrepreneur programs",
+        "opening hours"
+      ],
+      "notEnoughInfoFor": [
+        "program enrollment details",
+        "product pricing"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TARIFS",
+          "url": "https://atb.tn/doc/tarifs-atb.pdf",
+          "filename": "tarifs-atb.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB - Espace Finance\nURL: https://atb.tn/atb-finance\nLanguage: fr\n\nContext summary:\nEspace Finance page. Full sitemap-like product/service listing (accounts, cards, packs, transfers, savings, financing, e-banking, services) plus news about ATB's Espace Finance program supporting entrepreneurs and TPME.\n\nVerified key points:\n- ATB runs a 'Cycle Femmes Entrepreneures' program supporting female entrepreneurship Evidence: \"L’ATB confirme son engagement en faveur de l'entrepreneuriat féminin en consacrant la troisième rencontre du programme Espace Finance...\"\n- ATB provides exclusive support to TPME in partnership with Espace Finance Evidence: \"L’ATB lance un accompagnement exclusif aux TPME en partenariat avec Espace Finance\"\n- The page shows branch/public opening hours from 08h15 to 13h30. Evidence: \"De 08h15 à 13h30\"\n\nVisible/downloadable documents:\n- TARIFS — https://atb.tn/doc/tarifs-atb.pdf\n\nUseful for questions about:\n- ATB product catalog overview\n- Espace Finance / entrepreneur programs\n- opening hours\n\nNot enough information for:\n- program enrollment details\n- product pricing",
+      "confidence": "medium"
+    },
+    {
+      "id": "professionnels",
+      "type": "page",
+      "url": "https://atb.tn/professionnels",
+      "title": "ATB -ARAB Tunisian BANK",
+      "language": "fr",
+      "richContext": "Professionals space landing. Same product/service catalog and services descriptions as the homepage, oriented to professional clients. Largely navigational.",
+      "keyPoints": [
+        {
+          "point": "ATB offers portfolio management expertise",
+          "evidence": "L'ATB assure une fort compétence certaine en matière de gestion de portefeuille."
+        },
+        {
+          "point": "Clients and non-clients can use ATB change desks in all branches",
+          "evidence": "Client ou non de l’ATB, vous pouvez utiliser nos desks de change présents dans toutes nos agences."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB offering for professionals",
+        "portfolio management",
+        "currency change desks"
+      ],
+      "notEnoughInfoFor": [
+        "professional-specific product terms"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TARIFS",
+          "url": "https://atb.tn/doc/tarifs-atb.pdf",
+          "filename": "tarifs-atb.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB -ARAB Tunisian BANK\nURL: https://atb.tn/professionnels\nLanguage: fr\n\nContext summary:\nProfessionals space landing. Same product/service catalog and services descriptions as the homepage, oriented to professional clients. Largely navigational.\n\nVerified key points:\n- ATB offers portfolio management expertise Evidence: \"L'ATB assure une fort compétence certaine en matière de gestion de portefeuille.\"\n- Clients and non-clients can use ATB change desks in all branches Evidence: \"Client ou non de l’ATB, vous pouvez utiliser nos desks de change présents dans toutes nos agences.\"\n\nVisible/downloadable documents:\n- TARIFS — https://atb.tn/doc/tarifs-atb.pdf\n\nUseful for questions about:\n- ATB offering for professionals\n- portfolio management\n- currency change desks\n\nNot enough information for:\n- professional-specific product terms",
+      "confidence": "medium"
+    },
+    {
+      "id": "ae-business-center",
+      "type": "page",
+      "url": "https://atb.tn/ae",
+      "title": "ATB Business Center - le portail de l'entrepreneur et de l'entreprise",
+      "language": "fr",
+      "richContext": "Business Center segmentation page distinguishing TPME and liberal professions, promoting a special support scheme for treasury needs during crisis periods.",
+      "keyPoints": [
+        {
+          "point": "ATB set up a special scheme to support treasury needs during crisis periods",
+          "evidence": "ATB a mis en place un dispositif spécial pour vous accompagner en cette période de crise et répondre rapidement à vos besoins éventuels en matière de trésorerie"
+        },
+        {
+          "point": "Targets TPME – very small and medium enterprises",
+          "evidence": "Trés petites et moyennes entreprises"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB support for TPME",
+        "support for liberal professions",
+        "crisis treasury support"
+      ],
+      "notEnoughInfoFor": [
+        "scheme eligibility and terms"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB Business Center - le portail de l'entrepreneur et de l'entreprise\nURL: https://atb.tn/ae\nLanguage: fr\n\nContext summary:\nBusiness Center segmentation page distinguishing TPME and liberal professions, promoting a special support scheme for treasury needs during crisis periods.\n\nVerified key points:\n- ATB set up a special scheme to support treasury needs during crisis periods Evidence: \"ATB a mis en place un dispositif spécial pour vous accompagner en cette période de crise et répondre rapidement à vos besoins éventuels en matière de trésorerie\"\n- Targets TPME – very small and medium enterprises Evidence: \"Trés petites et moyennes entreprises\"\n\nUseful for questions about:\n- ATB support for TPME\n- support for liberal professions\n- crisis treasury support\n\nNot enough information for:\n- scheme eligibility and terms",
+      "confidence": "medium"
+    },
+    {
+      "id": "contact",
+      "type": "page",
+      "url": "https://atb.tn/contact",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Contact page. Gives head-office address, standard and Customer Relations Center (CRC) phone numbers, and dedicated email addresses for information, CRC and complaints, plus a contact form.",
+      "keyPoints": [
+        {
+          "point": "The contact page shows the address at 9 Rue Hédi Nouira.",
+          "evidence": "9 Rue Hédi Nouira"
+        },
+        {
+          "point": "Standard phone number",
+          "evidence": "Standard: 71 351 155"
+        },
+        {
+          "point": "Customer Relations Center (CRC) phone number",
+          "evidence": "CRC : +216 70 026 267"
+        },
+        {
+          "point": "General information email",
+          "evidence": "Pour toute demande d’information, veuillez envoyer un email à contact@atb.com.tn"
+        },
+        {
+          "point": "Complaints email",
+          "evidence": "qualite.retail@atb.com.tn"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "how to contact ATB",
+        "ATB phone numbers",
+        "ATB email addresses",
+        "customer relations center",
+        "where to send a complaint"
+      ],
+      "notEnoughInfoFor": [
+        "individual branch phone numbers",
+        "opening hours"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [
+        {
+          "action": "https://atb.tn/contact.php",
+          "method": "post",
+          "fields": [
+            {
+              "name": "nom",
+              "type": "text"
+            },
+            {
+              "name": "prenom",
+              "type": "text"
+            },
+            {
+              "name": "email",
+              "type": "text"
+            },
+            {
+              "name": "ville",
+              "type": "text"
+            },
+            {
+              "name": "pays",
+              "type": "text"
+            },
+            {
+              "name": "sujet",
+              "type": "text"
+            },
+            {
+              "name": "message",
+              "type": "textarea"
+            }
+          ]
+        }
+      ],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/contact\nLanguage: fr\n\nContext summary:\nContact page. Gives head-office address, standard and Customer Relations Center (CRC) phone numbers, and dedicated email addresses for information, CRC and complaints, plus a contact form.\n\nVerified key points:\n- The contact page shows the address at 9 Rue Hédi Nouira. Evidence: \"9 Rue Hédi Nouira\"\n- Standard phone number Evidence: \"Standard: 71 351 155\"\n- Customer Relations Center (CRC) phone number Evidence: \"CRC : +216 70 026 267\"\n- General information email Evidence: \"Pour toute demande d’information, veuillez envoyer un email à contact@atb.com.tn\"\n- Complaints email Evidence: \"qualite.retail@atb.com.tn\"\n\nForms visible on page:\n- method=post action=https://atb.tn/contact.php fields=nom, prenom, email, ville, pays, sujet, message\n\nUseful for questions about:\n- how to contact ATB\n- ATB phone numbers\n- ATB email addresses\n- customer relations center\n- where to send a complaint\n\nNot enough information for:\n- individual branch phone numbers\n- opening hours",
+      "confidence": "high"
+    },
+    {
+      "id": "enquete-satisfaction",
+      "type": "page",
+      "url": "https://atb.tn/enquette-satisfaction.php",
+      "title": "Enquete de satisfaction ATB",
+      "language": "fr",
+      "richContext": "Customer satisfaction survey page. Short intro then a long questionnaire form; asks name, first name and last 6 digits of account number to start.",
+      "keyPoints": [
+        {
+          "point": "ATB runs a customer satisfaction survey as part of continuous improvement",
+          "evidence": "Dans le cadre de son amélioration continue, ATB intègre dans sa réflexion les besoins de ses clients."
+        },
+        {
+          "point": "The survey takes about 3 minutes",
+          "evidence": "Seules 3 minutes suffisent pour renseigner toutes les questions."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB satisfaction survey",
+        "giving feedback to ATB"
+      ],
+      "notEnoughInfoFor": [
+        "survey questions content",
+        "results"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [
+        {
+          "action": "https://atb.tn/enquette-satisfaction.php",
+          "method": "post",
+          "fields": [
+            {
+              "name": "nom",
+              "type": "text",
+              "placeholder": "Votre nom ici",
+              "label": ""
+            },
+            {
+              "name": "prenom",
+              "type": "text",
+              "placeholder": "Votre prénom ici",
+              "label": ""
+            },
+            {
+              "name": "compte",
+              "type": "number",
+              "placeholder": "Votre n° de compte",
+              "label": ""
+            }
+          ]
+        }
+      ],
+      "promptText": "Page: Enquete de satisfaction ATB\nURL: https://atb.tn/enquette-satisfaction.php\nLanguage: fr\n\nContext summary:\nCustomer satisfaction survey page. Short intro then a long questionnaire form; asks name, first name and last 6 digits of account number to start.\n\nVerified key points:\n- ATB runs a customer satisfaction survey as part of continuous improvement Evidence: \"Dans le cadre de son amélioration continue, ATB intègre dans sa réflexion les besoins de ses clients.\"\n- The survey takes about 3 minutes Evidence: \"Seules 3 minutes suffisent pour renseigner toutes les questions.\"\n\nForms visible on page:\n- method=post action=https://atb.tn/enquette-satisfaction.php fields=Votre nom ici, Votre prénom ici, Votre n° de compte\n\nUseful for questions about:\n- ATB satisfaction survey\n- giving feedback to ATB\n\nNot enough information for:\n- survey questions content\n- results",
+      "confidence": "high"
+    },
+    {
+      "id": "agences",
+      "type": "page",
+      "url": "https://atb.tn/nos-agences-en-tunisie",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Branch network page. States guichet opening hours and lists ATB branches grouped by governorate across Tunisia, with a downloadable list and foreign correspondents.",
+      "keyPoints": [
+        {
+          "point": "Branch counters are open Monday to Friday",
+          "evidence": "Du lundi au Vendredi"
+        },
+        {
+          "point": "The branch counter hours are shown as 8h15 to 13h30.",
+          "evidence": "De 8h15 à 13h30."
+        },
+        {
+          "point": "ATB has multiple branches in Sfax",
+          "evidence": "Sfax - Sfax 2 - Sfax Ariana - Sfax El Ain - Sfax Gremda - Sfax Rte Menzel Chaker - Mall of Sfax - Sfax Thyna - Sfax Soukra -"
+        },
+        {
+          "point": "ATB has many branches across Tunis",
+          "evidence": "Bab Bnet - Bardo - Centrale - Charguia - El Aouina - El Mechtel - El menzah VI - Ezzouhour - Jazira - Lac - Le canal – Kheireddine - La Marsa - La Marsa 2 - Le Kram - Manar - Montfleury - Montplaisir - Mutu-International - Saadi - Intilaka - Lac 2 -"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB branch locations",
+        "branch opening hours",
+        "branches by city/governorate"
+      ],
+      "notEnoughInfoFor": [
+        "individual branch addresses",
+        "individual branch phone numbers",
+        "GPS coordinates"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "Télécharger la liste : Agences par région",
+          "url": "https://atb.tn/doc/agences-atb.pdf",
+          "filename": "agences-atb.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [
+        {
+          "action": "https://atb.tn/nos-agences-en-tunisie",
+          "method": "post",
+          "fields": [
+            {
+              "name": "searchInput",
+              "type": "text",
+              "placeholder": "Trouver rapidement la liste des agences",
+              "label": ""
+            }
+          ]
+        }
+      ],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/nos-agences-en-tunisie\nLanguage: fr\n\nContext summary:\nBranch network page. States guichet opening hours and lists ATB branches grouped by governorate across Tunisia, with a downloadable list and foreign correspondents.\n\nVerified key points:\n- Branch counters are open Monday to Friday Evidence: \"Du lundi au Vendredi\"\n- The branch counter hours are shown as 8h15 to 13h30. Evidence: \"De 8h15 à 13h30.\"\n- ATB has multiple branches in Sfax Evidence: \"Sfax - Sfax 2 - Sfax Ariana - Sfax El Ain - Sfax Gremda - Sfax Rte Menzel Chaker - Mall of Sfax - Sfax Thyna - Sfax Soukra -\"\n- ATB has many branches across Tunis Evidence: \"Bab Bnet - Bardo - Centrale - Charguia - El Aouina - El Mechtel - El menzah VI - Ezzouhour - Jazira - Lac - Le canal – Kheireddine - La Marsa - La Marsa 2 - Le Kram - Manar - Montfleury - Montplaisir - Mutu-International - Saadi - Intilaka - Lac 2 -\"\n\nVisible/downloadable documents:\n- Télécharger la liste : Agences par région — https://atb.tn/doc/agences-atb.pdf\n\nForms visible on page:\n- method=post action=https://atb.tn/nos-agences-en-tunisie fields=Trouver rapidement la liste des agences\n\nUseful for questions about:\n- ATB branch locations\n- branch opening hours\n- branches by city/governorate\n\nNot enough information for:\n- individual branch addresses\n- individual branch phone numbers\n- GPS coordinates",
+      "confidence": "high"
+    },
+    {
+      "id": "reclamation",
+      "type": "page",
+      "url": "https://atb.tn/reclamation",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Complaints page. Explains the complaint escalation channels: phone to the Customer Relations Center, email, a client advisor, and finally the mediator.",
+      "keyPoints": [
+        {
+          "point": "Complaints can be addressed by phone through the customer relationship center.",
+          "evidence": "Par téléphone auprés de notre Centre de relation client"
+        },
+        {
+          "point": "Customer Relations Center phone number for complaints",
+          "evidence": "70 026 267"
+        },
+        {
+          "point": "Complaints email address",
+          "evidence": "qualite.retail@atb.com.tn"
+        },
+        {
+          "point": "The page lists the mediator as a last-resort channel.",
+          "evidence": "En dernier recours\n\nLe médiateur"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "how to file a complaint with ATB",
+        "complaint escalation",
+        "mediator"
+      ],
+      "notEnoughInfoFor": [
+        "complaint processing time",
+        "mediator contact details"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/reclamation\nLanguage: fr\n\nContext summary:\nComplaints page. Explains the complaint escalation channels: phone to the Customer Relations Center, email, a client advisor, and finally the mediator.\n\nVerified key points:\n- Complaints can be addressed by phone through the customer relationship center. Evidence: \"Par téléphone auprés de notre Centre de relation client\"\n- Customer Relations Center phone number for complaints Evidence: \"70 026 267\"\n- Complaints email address Evidence: \"qualite.retail@atb.com.tn\"\n- The page lists the mediator as a last-resort channel. Evidence: \"En dernier recours\n\nLe médiateur\"\n\nUseful for questions about:\n- how to file a complaint with ATB\n- complaint escalation\n- mediator\n\nNot enough information for:\n- complaint processing time\n- mediator contact details",
+      "confidence": "high"
+    },
+    {
+      "id": "home-ar",
+      "type": "page",
+      "url": "https://atb.tn/ar",
+      "title": "البنك العربي لتونس",
+      "language": "ar",
+      "richContext": "Arabic-language homepage, mirroring the French homepage: products (accounts, cards, credits, savings, investment), services, news and contact block in Arabic.",
+      "keyPoints": [
+        {
+          "point": "ATB launched the 3rd edition of its '100 days SAKAN' housing offer",
+          "evidence": "البنك العربي لتونس يطلق النسخة الثالثة من عرض 100 يوم سكن من ATB مزايا إضافية لتحقيق مشروعكم العقاري!"
+        },
+        {
+          "point": "Head office address (Arabic)",
+          "evidence": "المقر الإجتماعي: 9 شارع الهادي نويرة، 1001 تونس"
+        },
+        {
+          "point": "The Arabic homepage shows the phone number 71 351 155.",
+          "evidence": "الهاتف: 155 351 71"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB Arabic site",
+        "ATB news in Arabic",
+        "contact info in Arabic"
+      ],
+      "notEnoughInfoFor": [
+        "detailed product terms"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "أسعارنا",
+          "url": "https://atb.tn/doc/tarifs-atb.pdf",
+          "filename": "tarifs-atb.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: البنك العربي لتونس\nURL: https://atb.tn/ar\nLanguage: ar\n\nContext summary:\nArabic-language homepage, mirroring the French homepage: products (accounts, cards, credits, savings, investment), services, news and contact block in Arabic.\n\nVerified key points:\n- ATB launched the 3rd edition of its '100 days SAKAN' housing offer Evidence: \"البنك العربي لتونس يطلق النسخة الثالثة من عرض 100 يوم سكن من ATB مزايا إضافية لتحقيق مشروعكم العقاري!\"\n- Head office address (Arabic) Evidence: \"المقر الإجتماعي: 9 شارع الهادي نويرة، 1001 تونس\"\n- The Arabic homepage shows the phone number 71 351 155. Evidence: \"الهاتف: 155 351 71\"\n\nVisible/downloadable documents:\n- أسعارنا — https://atb.tn/doc/tarifs-atb.pdf\n\nUseful for questions about:\n- ATB Arabic site\n- ATB news in Arabic\n- contact info in Arabic\n\nNot enough information for:\n- detailed product terms",
+      "confidence": "high"
+    },
+    {
+      "id": "banque-au-quotidien",
+      "type": "page",
+      "url": "https://atb.tn/banque-au-quotidien",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Everyday-banking hub page. Minimal body: links to accounts, cards and money transfer.",
+      "keyPoints": [
+        {
+          "point": "The everyday banking hub lists accounts, cards and money transfer.",
+          "evidence": "La banque au quotidien\nNos comptes\nNos cartes\nTransfert d'argent"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "everyday banking categories"
+      ],
+      "notEnoughInfoFor": [
+        "product details",
+        "fees"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/banque-au-quotidien\nLanguage: fr\n\nContext summary:\nEveryday-banking hub page. Minimal body: links to accounts, cards and money transfer.\n\nVerified key points:\n- The everyday banking hub lists accounts, cards and money transfer. Evidence: \"La banque au quotidien\nNos comptes\nNos cartes\nTransfert d'argent\"\n\nUseful for questions about:\n- everyday banking categories\n\nNot enough information for:\n- product details\n- fees",
+      "confidence": "low"
+    },
+    {
+      "id": "documents-utiles",
+      "type": "page",
+      "url": "https://atb.tn/documents_utiles.php",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Useful-documents page. Central library of downloadable PDF forms grouped by theme: e-banking subscriptions, account opening, credit request, card request, and other documents (tourist allowance, data protection charter, banking FAQ).",
+      "keyPoints": [
+        {
+          "point": "Provides an account opening / data update form for natural persons",
+          "evidence": "Formulaire d'ouverture de compte / mise à jour des données pour Personne Physique"
+        },
+        {
+          "point": "Provides a credit request form for individuals",
+          "evidence": "Demande de Crédit aux particuliers"
+        },
+        {
+          "point": "Provides e-banking subscription forms (ATBNET/ATBMobile, Mobilink, Messenger)",
+          "evidence": "Formulaire d'abonnement au service ATBNET/ATBMobile"
+        },
+        {
+          "point": "Provides a personal data protection charter",
+          "evidence": "Charte ATB relative à la protection de données à caratères personnel"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB downloadable forms",
+        "account opening form",
+        "credit request form",
+        "e-banking subscription forms",
+        "data protection charter"
+      ],
+      "notEnoughInfoFor": [
+        "content inside the PDFs"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "Formulaire d'abonnement au service ATBNET/ATBMobile",
+          "url": "https://atb.tn/doc/Formulaire_Abonnement-%20ATBNET-ATBMOBILE.pdf",
+          "filename": "Formulaire_Abonnement- ATBNET-ATBMOBILE.pdf",
+          "fileType": "pdf"
+        },
+        {
+          "text": "Formulaire d'ouverture de compte / mise à jour des données pour Personne Physique",
+          "url": "https://atb.tn/doc/Formulaire-ouverture-MAJ-PP-FR.pdf",
+          "filename": "Formulaire-ouverture-MAJ-PP-FR.pdf",
+          "fileType": "pdf"
+        },
+        {
+          "text": "Formulaire d'ouverture de compte joint",
+          "url": "https://atb.tn/doc/Formulaire-ouverture-compte-joint-PP.pdf",
+          "filename": "Formulaire-ouverture-compte-joint-PP.pdf",
+          "fileType": "pdf"
+        },
+        {
+          "text": "Demande de Crédit aux particuliers",
+          "url": "https://atb.tn/doc/Demande-de-credit-aux-particuliers.pdf",
+          "filename": "Demande-de-credit-aux-particuliers.pdf",
+          "fileType": "pdf"
+        },
+        {
+          "text": "Demande relative à la carte bancaire",
+          "url": "https://atb.tn/doc/Demande-relative-a-la-carte-bancaire.pdf",
+          "filename": "Demande-relative-a-la-carte-bancaire.pdf",
+          "fileType": "pdf"
+        },
+        {
+          "text": "Charte ATB relative à la protection de données à caratères personnel",
+          "url": "https://atb.tn/doc/Document-protection-donnees.pdf",
+          "filename": "Document-protection-donnees.pdf",
+          "fileType": "pdf"
+        },
+        {
+          "text": "FAQ secteur bancaire et financier",
+          "url": "https://atb.tn/doc/FAQ-secteur-bancaire-et-financier.pdf",
+          "filename": "FAQ-secteur-bancaire-et-financier.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/documents_utiles.php\nLanguage: fr\n\nContext summary:\nUseful-documents page. Central library of downloadable PDF forms grouped by theme: e-banking subscriptions, account opening, credit request, card request, and other documents (tourist allowance, data protection charter, banking FAQ).\n\nVerified key points:\n- Provides an account opening / data update form for natural persons Evidence: \"Formulaire d'ouverture de compte / mise à jour des données pour Personne Physique\"\n- Provides a credit request form for individuals Evidence: \"Demande de Crédit aux particuliers\"\n- Provides e-banking subscription forms (ATBNET/ATBMobile, Mobilink, Messenger) Evidence: \"Formulaire d'abonnement au service ATBNET/ATBMobile\"\n- Provides a personal data protection charter Evidence: \"Charte ATB relative à la protection de données à caratères personnel\"\n\nVisible/downloadable documents:\n- Formulaire d'abonnement au service ATBNET/ATBMobile — https://atb.tn/doc/Formulaire_Abonnement-%20ATBNET-ATBMOBILE.pdf\n- Formulaire d'ouverture de compte / mise à jour des données pour Personne Physique — https://atb.tn/doc/Formulaire-ouverture-MAJ-PP-FR.pdf\n- Formulaire d'ouverture de compte joint — https://atb.tn/doc/Formulaire-ouverture-compte-joint-PP.pdf\n- Demande de Crédit aux particuliers — https://atb.tn/doc/Demande-de-credit-aux-particuliers.pdf\n- Demande relative à la carte bancaire — https://atb.tn/doc/Demande-relative-a-la-carte-bancaire.pdf\n- Charte ATB relative à la protection de données à caratères personnel — https://atb.tn/doc/Document-protection-donnees.pdf\n- FAQ secteur bancaire et financier — https://atb.tn/doc/FAQ-secteur-bancaire-et-financier.pdf\n\nUseful for questions about:\n- ATB downloadable forms\n- account opening form\n- credit request form\n- e-banking subscription forms\n- data protection charter\n\nNot enough information for:\n- content inside the PDFs",
+      "confidence": "high"
+    },
+    {
+      "id": "offres-emploi",
+      "type": "page",
+      "url": "https://atb.tn/offres-emploi",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Recruitment page. Describes ATB's hiring philosophy and lists current IT/engineering job openings with missions, required degree, experience and skills.",
+      "keyPoints": [
+        {
+          "point": "ATB describes a rigorous, selective, ethical and equitable recruitment process",
+          "evidence": "Arab Tunisian Bank se prévaut d’un processus de recrutement alliant rigueur et sélectivité, mais aussi éthique et équité."
+        },
+        {
+          "point": "Open role: Infrastructure Administration Engineer",
+          "evidence": "D’Ingénieur Administration Infrastructure"
+        },
+        {
+          "point": "Open role: Security and Cyber Security Administration Engineer",
+          "evidence": "Ingénieur Administration Sécurité et Cyber Sécurité"
+        },
+        {
+          "point": "Openings require at least 3 years of experience",
+          "evidence": "• Au moins 3 ans d’expérience"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB job openings",
+        "careers at ATB",
+        "IT/engineering roles",
+        "recruitment process"
+      ],
+      "notEnoughInfoFor": [
+        "salary",
+        "application deadlines",
+        "non-IT roles"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/offres-emploi\nLanguage: fr\n\nContext summary:\nRecruitment page. Describes ATB's hiring philosophy and lists current IT/engineering job openings with missions, required degree, experience and skills.\n\nVerified key points:\n- ATB describes a rigorous, selective, ethical and equitable recruitment process Evidence: \"Arab Tunisian Bank se prévaut d’un processus de recrutement alliant rigueur et sélectivité, mais aussi éthique et équité.\"\n- Open role: Infrastructure Administration Engineer Evidence: \"D’Ingénieur Administration Infrastructure\"\n- Open role: Security and Cyber Security Administration Engineer Evidence: \"Ingénieur Administration Sécurité et Cyber Sécurité\"\n- Openings require at least 3 years of experience Evidence: \"• Au moins 3 ans d’expérience\"\n\nUseful for questions about:\n- ATB job openings\n- careers at ATB\n- IT/engineering roles\n- recruitment process\n\nNot enough information for:\n- salary\n- application deadlines\n- non-IT roles",
+      "confidence": "high"
+    },
+    {
+      "id": "packs",
+      "type": "page",
+      "url": "https://atb.tn/packs",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Packs listing page. Presents three bundled service packs with short teasers.",
+      "keyPoints": [
+        {
+          "point": "Pack Electron bundles essential everyday account-management services",
+          "evidence": "Les services essentiels à la gestion de votre compte au quotidien tout en réalisant des économies ..."
+        },
+        {
+          "point": "Pack World Elite targets the most demanding clients",
+          "evidence": "Spécialement conçu pour les clients les plus exigeants..."
+        },
+        {
+          "point": "Pack Horizon accompanies clients through life moments",
+          "evidence": "Le Pack Horizon est pensé pour vous accompagner dans chaque moment de votre vie..."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB packs",
+        "Pack Electron",
+        "Pack World Elite",
+        "Pack Horizon"
+      ],
+      "notEnoughInfoFor": [
+        "pack contents",
+        "pack pricing",
+        "pack eligibility"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/packs\nLanguage: fr\n\nContext summary:\nPacks listing page. Presents three bundled service packs with short teasers.\n\nVerified key points:\n- Pack Electron bundles essential everyday account-management services Evidence: \"Les services essentiels à la gestion de votre compte au quotidien tout en réalisant des économies ...\"\n- Pack World Elite targets the most demanding clients Evidence: \"Spécialement conçu pour les clients les plus exigeants...\"\n- Pack Horizon accompanies clients through life moments Evidence: \"Le Pack Horizon est pensé pour vous accompagner dans chaque moment de votre vie...\"\n\nUseful for questions about:\n- ATB packs\n- Pack Electron\n- Pack World Elite\n- Pack Horizon\n\nNot enough information for:\n- pack contents\n- pack pricing\n- pack eligibility",
+      "confidence": "medium"
+    },
+    {
+      "id": "comptes",
+      "type": "page",
+      "url": "https://atb.tn/comptes",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Accounts listing page. Enumerates the current-account types ATB offers, including dinar, convertible-dinar, TRE and non-resident accounts.",
+      "keyPoints": [
+        {
+          "point": "Offers a dinar current (cheque) account",
+          "evidence": "Le compte chèques en dinars"
+        },
+        {
+          "point": "Offers a convertible-dinar cheque account for Tunisians residing abroad",
+          "evidence": "Le compte chèque en dinars convertibles pour les Tunisiens Résidents à l'Étranger"
+        },
+        {
+          "point": "Offers a non-resident internal account",
+          "evidence": "Le compte intérieur non résident"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "types of ATB accounts",
+        "accounts for residents abroad",
+        "non-resident accounts"
+      ],
+      "notEnoughInfoFor": [
+        "account fees",
+        "opening requirements",
+        "account features detail"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/comptes\nLanguage: fr\n\nContext summary:\nAccounts listing page. Enumerates the current-account types ATB offers, including dinar, convertible-dinar, TRE and non-resident accounts.\n\nVerified key points:\n- Offers a dinar current (cheque) account Evidence: \"Le compte chèques en dinars\"\n- Offers a convertible-dinar cheque account for Tunisians residing abroad Evidence: \"Le compte chèque en dinars convertibles pour les Tunisiens Résidents à l'Étranger\"\n- Offers a non-resident internal account Evidence: \"Le compte intérieur non résident\"\n\nUseful for questions about:\n- types of ATB accounts\n- accounts for residents abroad\n- non-resident accounts\n\nNot enough information for:\n- account fees\n- opening requirements\n- account features detail",
+      "confidence": "medium"
+    },
+    {
+      "id": "cartes",
+      "type": "page",
+      "url": "https://atb.tn/cartes",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Cards listing page. Enumerates ATB's bank cards with one-line descriptions, from entry Visa Electron to premium (Mastercard World, Visa Gold, Amex) and niche cards (Lella for women, C'Jeune for youth, El Khir savings, Moussafer for tourist allowance, BNPL PayLater, virtual E-pay).",
+      "keyPoints": [
+        {
+          "point": "Offers a virtual E-pay card for secure online payment",
+          "evidence": "E-pay, votre Solution de Paiement en Ligne Sécurisée"
+        },
+        {
+          "point": "Offers Carte Lella, dedicated exclusively to women",
+          "evidence": "La carte exclusivement dédiée aux femmes...."
+        },
+        {
+          "point": "Offers Carte C'Jeune, the first bank card dedicated to young people",
+          "evidence": "La première carte bancaire dédiée aux jeunes ...."
+        },
+        {
+          "point": "Offers a BNPL – PayLater card",
+          "evidence": "Carte BNPL – PayLater"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB bank cards",
+        "card for women",
+        "card for youth",
+        "virtual/online payment card",
+        "premium cards"
+      ],
+      "notEnoughInfoFor": [
+        "card fees",
+        "card limits",
+        "eligibility"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/cartes\nLanguage: fr\n\nContext summary:\nCards listing page. Enumerates ATB's bank cards with one-line descriptions, from entry Visa Electron to premium (Mastercard World, Visa Gold, Amex) and niche cards (Lella for women, C'Jeune for youth, El Khir savings, Moussafer for tourist allowance, BNPL PayLater, virtual E-pay).\n\nVerified key points:\n- Offers a virtual E-pay card for secure online payment Evidence: \"E-pay, votre Solution de Paiement en Ligne Sécurisée\"\n- Offers Carte Lella, dedicated exclusively to women Evidence: \"La carte exclusivement dédiée aux femmes....\"\n- Offers Carte C'Jeune, the first bank card dedicated to young people Evidence: \"La première carte bancaire dédiée aux jeunes ....\"\n- Offers a BNPL – PayLater card Evidence: \"Carte BNPL – PayLater\"\n\nUseful for questions about:\n- ATB bank cards\n- card for women\n- card for youth\n- virtual/online payment card\n- premium cards\n\nNot enough information for:\n- card fees\n- card limits\n- eligibility",
+      "confidence": "medium"
+    },
+    {
+      "id": "epargne-elkhir",
+      "type": "page",
+      "url": "https://atb.tn/produits/epargne-elkhir-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "El Khir special savings account product page. Explains quarterly capitalized interest, the credit-rate bonus tied to savings, availability of funds, and the associated El Khir card.",
+      "keyPoints": [
+        {
+          "point": "Interest on the ATB savings account is calculated and capitalized each quarter",
+          "evidence": "Sur votre compte épargne ATB, les intérêts sont calculés et capitalisés à chaque arrêté trimestriel."
+        },
+        {
+          "point": "Savings give a rate reduction on the part of a credit equal to 4 times the savings",
+          "evidence": "vous bénéficiez d'une réduction de taux sur la partie du crédit égale à 4 fois votre épargne."
+        },
+        {
+          "point": "The credit-rate bonus can reach 1% of the credit rate",
+          "evidence": "Cette bonification qui peut atteindre 1% du taux du crédit se fait en fonction:"
+        },
+        {
+          "point": "Savings funds are fully available at any time (not blocked)",
+          "evidence": "Une disponibilité totale de l'épargne ; votre argent n'est pas bloqué, vous pouvez en disposer à tout moment,"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "El Khir savings account",
+        "savings interest capitalization",
+        "credit rate bonus from savings",
+        "fund availability"
+      ],
+      "notEnoughInfoFor": [
+        "exact interest rate",
+        "minimum deposit"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/epargne-elkhir-presentation.php\nLanguage: fr\n\nContext summary:\nEl Khir special savings account product page. Explains quarterly capitalized interest, the credit-rate bonus tied to savings, availability of funds, and the associated El Khir card.\n\nVerified key points:\n- Interest on the ATB savings account is calculated and capitalized each quarter Evidence: \"Sur votre compte épargne ATB, les intérêts sont calculés et capitalisés à chaque arrêté trimestriel.\"\n- Savings give a rate reduction on the part of a credit equal to 4 times the savings Evidence: \"vous bénéficiez d'une réduction de taux sur la partie du crédit égale à 4 fois votre épargne.\"\n- The credit-rate bonus can reach 1% of the credit rate Evidence: \"Cette bonification qui peut atteindre 1% du taux du crédit se fait en fonction:\"\n- Savings funds are fully available at any time (not blocked) Evidence: \"Une disponibilité totale de l'épargne ; votre argent n'est pas bloqué, vous pouvez en disposer à tout moment,\"\n\nUseful for questions about:\n- El Khir savings account\n- savings interest capitalization\n- credit rate bonus from savings\n- fund availability\n\nNot enough information for:\n- exact interest rate\n- minimum deposit",
+      "confidence": "high"
+    },
+    {
+      "id": "epargne-conv",
+      "type": "page",
+      "url": "https://atb.tn/produits/epargne-conv-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Convertible-dinar / foreign-currency savings account product page. Describes deposits/withdrawals in any branch, transfers, market-indexed remuneration, and the El Khir card with online tracking.",
+      "keyPoints": [
+        {
+          "point": "The convertible-dinar savings account allows deposits and withdrawals at any time in all ATB branches",
+          "evidence": "Des versements et des retraits à tout moment de toutes les agences ATB. L'ensemble de vos opérations est enregistré sur votre livret"
+        },
+        {
+          "point": "Remuneration is indexed on the money-market rate for dinar and convertible-dinar passbook accounts",
+          "evidence": "Une rémunération indexée sur le taux du marché monétaire pour les comptes sur livret en dinars et dinars convertibles et sur le taux moyen annuel de chaque devise pour les comptes."
+        },
+        {
+          "point": "Account holders receive a quarterly statement of operations",
+          "evidence": "Recevoir chez vous un relevé trimestriel des dernières opérations effectuées sur votre Compte Epargne"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "convertible-dinar savings account",
+        "foreign-currency savings",
+        "savings remuneration basis"
+      ],
+      "notEnoughInfoFor": [
+        "exact rates",
+        "minimum balance"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/epargne-conv-presentation.php\nLanguage: fr\n\nContext summary:\nConvertible-dinar / foreign-currency savings account product page. Describes deposits/withdrawals in any branch, transfers, market-indexed remuneration, and the El Khir card with online tracking.\n\nVerified key points:\n- The convertible-dinar savings account allows deposits and withdrawals at any time in all ATB branches Evidence: \"Des versements et des retraits à tout moment de toutes les agences ATB. L'ensemble de vos opérations est enregistré sur votre livret\"\n- Remuneration is indexed on the money-market rate for dinar and convertible-dinar passbook accounts Evidence: \"Une rémunération indexée sur le taux du marché monétaire pour les comptes sur livret en dinars et dinars convertibles et sur le taux moyen annuel de chaque devise pour les comptes.\"\n- Account holders receive a quarterly statement of operations Evidence: \"Recevoir chez vous un relevé trimestriel des dernières opérations effectuées sur votre Compte Epargne\"\n\nUseful for questions about:\n- convertible-dinar savings account\n- foreign-currency savings\n- savings remuneration basis\n\nNot enough information for:\n- exact rates\n- minimum balance",
+      "confidence": "high"
+    },
+    {
+      "id": "epargnes",
+      "type": "page",
+      "url": "https://atb.tn/epargnes",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Savings listing page. Links the three savings accounts with short teasers.",
+      "keyPoints": [
+        {
+          "point": "Offers the El Khir special savings account",
+          "evidence": "Compte spécial Epargne El Khir"
+        },
+        {
+          "point": "Offers a convertible-dinar / foreign-currency savings account",
+          "evidence": "Le Compte Epargne en dinars convertibles ou en devises"
+        },
+        {
+          "point": "Offers an Investment savings account",
+          "evidence": "Le Compte Epargne Investissement"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB savings accounts list"
+      ],
+      "notEnoughInfoFor": [
+        "rates",
+        "detailed terms"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/epargnes\nLanguage: fr\n\nContext summary:\nSavings listing page. Links the three savings accounts with short teasers.\n\nVerified key points:\n- Offers the El Khir special savings account Evidence: \"Compte spécial Epargne El Khir\"\n- Offers a convertible-dinar / foreign-currency savings account Evidence: \"Le Compte Epargne en dinars convertibles ou en devises\"\n- Offers an Investment savings account Evidence: \"Le Compte Epargne Investissement\"\n\nUseful for questions about:\n- ATB savings accounts list\n\nNot enough information for:\n- rates\n- detailed terms",
+      "confidence": "medium"
+    },
+    {
+      "id": "credits",
+      "type": "page",
+      "url": "https://atb.tn/credits",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Credits (loans) hub page. Groups financing solutions into cars, consumption and real estate, and lists each named credit with its category.",
+      "keyPoints": [
+        {
+          "point": "ATB offers financing for buying a home, renovating, buying a car and financing holidays",
+          "evidence": "Acquérir votre maison, rénover et embellir votre demeure, acheter une voiture neuve ou d'occasion, financer vos vacances :"
+        },
+        {
+          "point": "Crédit Sakan, Crédit Tahawel, Crédit ATBAWALSAKAN and Crédit Renov are listed as real-estate credits.",
+          "evidence": "Crédit Sakan\nIMMOBILIERS\nCrédit Mounassib\nCONSOMMATION\nCrédit Tahawel\nIMMOBILIERS\nCrédit ATBAWALSAKAN\nIMMOBILIERS\nCrédit Sayara\nVOITURES\nCrédit Renov\nIMMOBILIERS"
+        },
+        {
+          "point": "Crédit Sayara and Crédit Start are listed as car credits.",
+          "evidence": "Crédit Sayara\nVOITURES\nCrédit Renov\nIMMOBILIERS\nCrédit Start\nVOITURES"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB loans overview",
+        "types of credit",
+        "car / real-estate / consumption loans"
+      ],
+      "notEnoughInfoFor": [
+        "rates",
+        "amounts",
+        "eligibility per credit"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/credits\nLanguage: fr\n\nContext summary:\nCredits (loans) hub page. Groups financing solutions into cars, consumption and real estate, and lists each named credit with its category.\n\nVerified key points:\n- ATB offers financing for buying a home, renovating, buying a car and financing holidays Evidence: \"Acquérir votre maison, rénover et embellir votre demeure, acheter une voiture neuve ou d'occasion, financer vos vacances :\"\n- Crédit Sakan, Crédit Tahawel, Crédit ATBAWALSAKAN and Crédit Renov are listed as real-estate credits. Evidence: \"Crédit Sakan\nIMMOBILIERS\nCrédit Mounassib\nCONSOMMATION\nCrédit Tahawel\nIMMOBILIERS\nCrédit ATBAWALSAKAN\nIMMOBILIERS\nCrédit Sayara\nVOITURES\nCrédit Renov\nIMMOBILIERS\"\n- Crédit Sayara and Crédit Start are listed as car credits. Evidence: \"Crédit Sayara\nVOITURES\nCrédit Renov\nIMMOBILIERS\nCrédit Start\nVOITURES\"\n\nUseful for questions about:\n- ATB loans overview\n- types of credit\n- car / real-estate / consumption loans\n\nNot enough information for:\n- rates\n- amounts\n- eligibility per credit",
+      "confidence": "medium"
+    },
+    {
+      "id": "credit-sakan",
+      "type": "page",
+      "url": "https://atb.tn/produits/credit-sakan-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Crédit Sakan page. Body content is minimal (mainly a cross-navigation of other credits grouped by consumption / real estate / cars); Sakan itself is an immobilier credit.",
+      "keyPoints": [
+        {
+          "point": "Crédit Sakan is listed among ATB's real-estate (immobilier) credits",
+          "evidence": "CRÉDIT SAKAN"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "Crédit Sakan existence",
+        "ATB real-estate loans"
+      ],
+      "notEnoughInfoFor": [
+        "Crédit Sakan amount, rate, duration or eligibility (not shown in captured text)"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/credit-sakan-presentation.php\nLanguage: fr\n\nContext summary:\nCrédit Sakan page. Body content is minimal (mainly a cross-navigation of other credits grouped by consumption / real estate / cars); Sakan itself is an immobilier credit.\n\nVerified key points:\n- Crédit Sakan is listed among ATB's real-estate (immobilier) credits Evidence: \"CRÉDIT SAKAN\"\n\nUseful for questions about:\n- Crédit Sakan existence\n- ATB real-estate loans\n\nNot enough information for:\n- Crédit Sakan amount, rate, duration or eligibility (not shown in captured text)",
+      "confidence": "low"
+    },
+    {
+      "id": "epargne-invest",
+      "type": "page",
+      "url": "https://atb.tn/produits/epargne-invest-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Investment savings account page. Captured body only shows the title and cross-links to the other savings accounts; no descriptive text.",
+      "keyPoints": [
+        {
+          "point": "ATB offers an Investment savings account (Compte Epargne Investissement)",
+          "evidence": "LE COMPTE EPARGNE INVESTISSEMENT"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "existence of the Investment savings account"
+      ],
+      "notEnoughInfoFor": [
+        "its features, rate, or conditions (not in captured text)"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/epargne-invest-presentation.php\nLanguage: fr\n\nContext summary:\nInvestment savings account page. Captured body only shows the title and cross-links to the other savings accounts; no descriptive text.\n\nVerified key points:\n- ATB offers an Investment savings account (Compte Epargne Investissement) Evidence: \"LE COMPTE EPARGNE INVESTISSEMENT\"\n\nUseful for questions about:\n- existence of the Investment savings account\n\nNot enough information for:\n- its features, rate, or conditions (not in captured text)",
+      "confidence": "low"
+    },
+    {
+      "id": "credit-tahawel",
+      "type": "page",
+      "url": "https://atb.tn/produits/credit-tahawel-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Crédit Tahawel product page. Home-improvement/extension real-estate credit for residents and non-residents, with amount caps, expertise threshold, max duration and TMM-indexed rate.",
+      "keyPoints": [
+        {
+          "point": "Tahawel finances up to 80% of justified expenses (70% for Tunisians residing abroad)",
+          "evidence": "Un maximum de 80% des dépenses justifiées et un maximum de 70% pour les Tunisiens Résidant à l’Etranger."
+        },
+        {
+          "point": "Expertise is mandatory for improvement credits above 30,000 TND",
+          "evidence": "L’expertise est obligatoire pour les crédits aménagement dont le montant est strictement supérieur à 30 000 TND."
+        },
+        {
+          "point": "Maximum repayment duration is 5 years",
+          "evidence": "5 ans comme durée maximale"
+        },
+        {
+          "point": "The rate is indexed on the TMM and varies with repayment duration",
+          "evidence": "Le taux est indexé sur le TMM et varie selon la durée de remboursement."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "Crédit Tahawel",
+        "home improvement loan",
+        "loan amount cap",
+        "loan duration",
+        "loan rate basis"
+      ],
+      "notEnoughInfoFor": [
+        "exact interest rate value",
+        "monthly payment amounts"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TÉLÉCHARGER LA DEMANDE DE CRÉDIT",
+          "url": "https://atb.tn/doc/Demande-de-credit-aux-particuliers.pdf",
+          "filename": "Demande-de-credit-aux-particuliers.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/credit-tahawel-presentation.php\nLanguage: fr\n\nContext summary:\nCrédit Tahawel product page. Home-improvement/extension real-estate credit for residents and non-residents, with amount caps, expertise threshold, max duration and TMM-indexed rate.\n\nVerified key points:\n- Tahawel finances up to 80% of justified expenses (70% for Tunisians residing abroad) Evidence: \"Un maximum de 80% des dépenses justifiées et un maximum de 70% pour les Tunisiens Résidant à l’Etranger.\"\n- Expertise is mandatory for improvement credits above 30,000 TND Evidence: \"L’expertise est obligatoire pour les crédits aménagement dont le montant est strictement supérieur à 30 000 TND.\"\n- Maximum repayment duration is 5 years Evidence: \"5 ans comme durée maximale\"\n- The rate is indexed on the TMM and varies with repayment duration Evidence: \"Le taux est indexé sur le TMM et varie selon la durée de remboursement.\"\n\nVisible/downloadable documents:\n- TÉLÉCHARGER LA DEMANDE DE CRÉDIT — https://atb.tn/doc/Demande-de-credit-aux-particuliers.pdf\n\nUseful for questions about:\n- Crédit Tahawel\n- home improvement loan\n- loan amount cap\n- loan duration\n- loan rate basis\n\nNot enough information for:\n- exact interest rate value\n- monthly payment amounts",
+      "confidence": "high"
+    },
+    {
+      "id": "credit-atbawalsakan",
+      "type": "page",
+      "url": "https://atb.tn/produits/credit-ATBAWALSAKAN-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Crédit ATBAWALSAKAN page. First-home real-estate credit without self-financing, with income eligibility band, property constraints, a two-part credit structure (state-subsidized + ATB Sakan) and required documents.",
+      "keyPoints": [
+        {
+          "point": "ATBAWALSAKAN is a real-estate credit without self-financing on advantageous terms",
+          "evidence": "C’est un crédit immobilier sans autofinancement et à conditions avantageuses."
+        },
+        {
+          "point": "Couple's average gross monthly income must be between 1538 and 3932 dinars, with one spouse salaried",
+          "evidence": "Le revenu mensuel moyen brut du couple doit être compris entre 1538 dinars ( 4,5 fois le SMIG ) et 3932 dinars ( 10 fois le SMIG) et l’un des conjoint doit être salarié."
+        },
+        {
+          "point": "Property price must not exceed 200,000 TND",
+          "evidence": "Le prix ne doit pas dépasser 200.000,000 TND."
+        },
+        {
+          "point": "The state-resource part: max 20% of price up to 40,000 dinars, 5-year interest-free grace, 7-year repayment, 2% rate",
+          "evidence": "Taux d'intérêt appliqué : 2% l’an."
+        },
+        {
+          "point": "The ATB Sakan part covers 80% of price up to 160,000 dinars, repayment up to 20 years",
+          "evidence": "La durée de remboursement peut aller jusqu’à 20 ans ."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATBAWALSAKAN",
+        "first-home loan without self-financing",
+        "income eligibility",
+        "property price cap",
+        "loan structure and rates"
+      ],
+      "notEnoughInfoFor": [
+        "current-year exact figures beyond those stated",
+        "processing time"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/credit-ATBAWALSAKAN-presentation.php\nLanguage: fr\n\nContext summary:\nCrédit ATBAWALSAKAN page. First-home real-estate credit without self-financing, with income eligibility band, property constraints, a two-part credit structure (state-subsidized + ATB Sakan) and required documents.\n\nVerified key points:\n- ATBAWALSAKAN is a real-estate credit without self-financing on advantageous terms Evidence: \"C’est un crédit immobilier sans autofinancement et à conditions avantageuses.\"\n- Couple's average gross monthly income must be between 1538 and 3932 dinars, with one spouse salaried Evidence: \"Le revenu mensuel moyen brut du couple doit être compris entre 1538 dinars ( 4,5 fois le SMIG ) et 3932 dinars ( 10 fois le SMIG) et l’un des conjoint doit être salarié.\"\n- Property price must not exceed 200,000 TND Evidence: \"Le prix ne doit pas dépasser 200.000,000 TND.\"\n- The state-resource part: max 20% of price up to 40,000 dinars, 5-year interest-free grace, 7-year repayment, 2% rate Evidence: \"Taux d'intérêt appliqué : 2% l’an.\"\n- The ATB Sakan part covers 80% of price up to 160,000 dinars, repayment up to 20 years Evidence: \"La durée de remboursement peut aller jusqu’à 20 ans .\"\n\nUseful for questions about:\n- ATBAWALSAKAN\n- first-home loan without self-financing\n- income eligibility\n- property price cap\n- loan structure and rates\n\nNot enough information for:\n- current-year exact figures beyond those stated\n- processing time",
+      "confidence": "high"
+    },
+    {
+      "id": "credit-sayara",
+      "type": "page",
+      "url": "https://atb.tn/produits/credit-sayara-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Crédit Sayara page. Car loan (new or used) financing up to 80% of price with up to 7-year repayment; spouse can be associated to raise the amount.",
+      "keyPoints": [
+        {
+          "point": "Sayara can finance up to 80% of the car price with no set ceiling",
+          "evidence": "Montant: Sans plafond- le financement peut atteindre 80% du prix de la voiture"
+        },
+        {
+          "point": "Repayment duration is up to 7 years",
+          "evidence": "Durée de remboursement: Jusqu'à 7 ans."
+        },
+        {
+          "point": "Associating a spouse allows a larger credit amount",
+          "evidence": "Et pour bénéficier d'un montant plus important, associez votre conjoint à votre crédit Sayara."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "Crédit Sayara",
+        "car loan",
+        "car loan amount",
+        "car loan duration"
+      ],
+      "notEnoughInfoFor": [
+        "interest rate",
+        "required down payment"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TÉLÉCHARGER LA LISTE DES DOCUMENTS POUR LE CRÉDIT SAYARA",
+          "url": "https://atb.tn/produits/pdf/credit_sayara_documents.pdf",
+          "filename": "credit_sayara_documents.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/credit-sayara-presentation.php\nLanguage: fr\n\nContext summary:\nCrédit Sayara page. Car loan (new or used) financing up to 80% of price with up to 7-year repayment; spouse can be associated to raise the amount.\n\nVerified key points:\n- Sayara can finance up to 80% of the car price with no set ceiling Evidence: \"Montant: Sans plafond- le financement peut atteindre 80% du prix de la voiture\"\n- Repayment duration is up to 7 years Evidence: \"Durée de remboursement: Jusqu'à 7 ans.\"\n- Associating a spouse allows a larger credit amount Evidence: \"Et pour bénéficier d'un montant plus important, associez votre conjoint à votre crédit Sayara.\"\n\nVisible/downloadable documents:\n- TÉLÉCHARGER LA LISTE DES DOCUMENTS POUR LE CRÉDIT SAYARA — https://atb.tn/produits/pdf/credit_sayara_documents.pdf\n\nUseful for questions about:\n- Crédit Sayara\n- car loan\n- car loan amount\n- car loan duration\n\nNot enough information for:\n- interest rate\n- required down payment",
+      "confidence": "high"
+    },
+    {
+      "id": "credit-mounasseb",
+      "type": "page",
+      "url": "https://atb.tn/produits/credit-mounasseb-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Crédit Mounassib page. A consumption credit described as fast, realistic, reasonable (36 months) and free-use (no expense justification).",
+      "keyPoints": [
+        {
+          "point": "Mounassib repayment spreads over 36 months (3 years)",
+          "evidence": "Raisonnable : son remboursement s'étale sur 36 mois (3 ans)."
+        },
+        {
+          "point": "No justification of expenses is required",
+          "evidence": "Libre : Aucune justification de vos dépenses ne vous sera demandée."
+        },
+        {
+          "point": "The amount is set according to repayment capacity",
+          "evidence": "Réaliste : son montant est étudié en fonction de votre capacité de remboursement"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "Crédit Mounassib",
+        "consumption loan",
+        "loan without expense justification",
+        "loan duration"
+      ],
+      "notEnoughInfoFor": [
+        "maximum amount",
+        "interest rate"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TÉLÉCHARGER LA DEMANDE DE CRÉDIT",
+          "url": "https://atb.tn/doc/Demande-de-credit-aux-particuliers.pdf",
+          "filename": "Demande-de-credit-aux-particuliers.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/credit-mounasseb-presentation.php\nLanguage: fr\n\nContext summary:\nCrédit Mounassib page. A consumption credit described as fast, realistic, reasonable (36 months) and free-use (no expense justification).\n\nVerified key points:\n- Mounassib repayment spreads over 36 months (3 years) Evidence: \"Raisonnable : son remboursement s'étale sur 36 mois (3 ans).\"\n- No justification of expenses is required Evidence: \"Libre : Aucune justification de vos dépenses ne vous sera demandée.\"\n- The amount is set according to repayment capacity Evidence: \"Réaliste : son montant est étudié en fonction de votre capacité de remboursement\"\n\nVisible/downloadable documents:\n- TÉLÉCHARGER LA DEMANDE DE CRÉDIT — https://atb.tn/doc/Demande-de-credit-aux-particuliers.pdf\n\nUseful for questions about:\n- Crédit Mounassib\n- consumption loan\n- loan without expense justification\n- loan duration\n\nNot enough information for:\n- maximum amount\n- interest rate",
+      "confidence": "high"
+    },
+    {
+      "id": "credit-start",
+      "type": "page",
+      "url": "https://atb.tn/produits/credit-start-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Crédit Start page. A driving-license financing credit (moto/auto/poids lourd) up to 2000 DT over up to 36 months; funds paid to the chosen driving school.",
+      "keyPoints": [
+        {
+          "point": "Start finances driving-license training regardless of license category",
+          "evidence": "START est un crédit pour financer la formation à la conduite et ce quelque soit la catégorie de permis à passer."
+        },
+        {
+          "point": "Amount is up to 2000 DT",
+          "evidence": "Montant : jusqu'à 2000 DT"
+        },
+        {
+          "point": "Repayment is up to 36 months",
+          "evidence": "Délai de remboursement : jusqu'à 36 mois."
+        },
+        {
+          "point": "Once granted, the money is transferred to the driving school's account",
+          "evidence": "Dès que votre crédit START est accordé, l'argent est viré sur le compte de votre auto école et vous pouvez commencer votre apprentissage de la conduite."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "Crédit Start",
+        "driving license loan",
+        "loan amount and duration"
+      ],
+      "notEnoughInfoFor": [
+        "interest rate",
+        "age requirements detail"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TÉLÉCHARGER LA LISTE DES DOCUMENTS POUR LE CRÉDIT START",
+          "url": "https://www.atb.tn/produits/doc/credit-start-document.pdf",
+          "filename": "credit-start-document.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/credit-start-presentation.php\nLanguage: fr\n\nContext summary:\nCrédit Start page. A driving-license financing credit (moto/auto/poids lourd) up to 2000 DT over up to 36 months; funds paid to the chosen driving school.\n\nVerified key points:\n- Start finances driving-license training regardless of license category Evidence: \"START est un crédit pour financer la formation à la conduite et ce quelque soit la catégorie de permis à passer.\"\n- Amount is up to 2000 DT Evidence: \"Montant : jusqu'à 2000 DT\"\n- Repayment is up to 36 months Evidence: \"Délai de remboursement : jusqu'à 36 mois.\"\n- Once granted, the money is transferred to the driving school's account Evidence: \"Dès que votre crédit START est accordé, l'argent est viré sur le compte de votre auto école et vous pouvez commencer votre apprentissage de la conduite.\"\n\nVisible/downloadable documents:\n- TÉLÉCHARGER LA LISTE DES DOCUMENTS POUR LE CRÉDIT START — https://www.atb.tn/produits/doc/credit-start-document.pdf\n\nUseful for questions about:\n- Crédit Start\n- driving license loan\n- loan amount and duration\n\nNot enough information for:\n- interest rate\n- age requirements detail",
+      "confidence": "high"
+    },
+    {
+      "id": "credit-renov",
+      "type": "page",
+      "url": "https://atb.tn/produits/credit-Renov-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Crédit Renov page. Captured body only shows the title and cross-navigation of other credits; no descriptive terms.",
+      "keyPoints": [
+        {
+          "point": "Crédit Renov is one of ATB's real-estate (immobilier) credits",
+          "evidence": "CRÉDIT RENOV"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "existence of Crédit Renov",
+        "ATB renovation loan"
+      ],
+      "notEnoughInfoFor": [
+        "amount, rate, duration or eligibility (not in captured text)"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/credit-Renov-presentation.php\nLanguage: fr\n\nContext summary:\nCrédit Renov page. Captured body only shows the title and cross-navigation of other credits; no descriptive terms.\n\nVerified key points:\n- Crédit Renov is one of ATB's real-estate (immobilier) credits Evidence: \"CRÉDIT RENOV\"\n\nUseful for questions about:\n- existence of Crédit Renov\n- ATB renovation loan\n\nNot enough information for:\n- amount, rate, duration or eligibility (not in captured text)",
+      "confidence": "low"
+    },
+    {
+      "id": "credit-bien-etre",
+      "type": "page",
+      "url": "https://atb.tn/produits/credit-Bien-etre-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Crédit Bien Être page. A consumption credit for medical/health/aesthetic expenses, capped at 30,000 DT over up to 3 years, granted on a health-establishment quote.",
+      "keyPoints": [
+        {
+          "point": "Bien Être is a consumption credit for medical, hospitalization or aesthetic-project expenses",
+          "evidence": "L’ATB vous offre le crédit Bien Être à des conditions de remboursement qui s’adaptent à votre situation."
+        },
+        {
+          "point": "It has a ceiling of 30,000 DT and repayment up to 3 years",
+          "evidence": "avec un plafond de 30 000DT"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "Crédit Bien Être",
+        "health/medical loan",
+        "loan ceiling and duration"
+      ],
+      "notEnoughInfoFor": [
+        "interest rate",
+        "detailed eligibility"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TÉLÉCHARGER LA DEMANDE DE CRÉDIT",
+          "url": "https://atb.tn/doc/Demande-de-credit-aux-particuliers.pdf",
+          "filename": "Demande-de-credit-aux-particuliers.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/credit-Bien-etre-presentation.php\nLanguage: fr\n\nContext summary:\nCrédit Bien Être page. A consumption credit for medical/health/aesthetic expenses, capped at 30,000 DT over up to 3 years, granted on a health-establishment quote.\n\nVerified key points:\n- Bien Être is a consumption credit for medical, hospitalization or aesthetic-project expenses Evidence: \"L’ATB vous offre le crédit Bien Être à des conditions de remboursement qui s’adaptent à votre situation.\"\n- It has a ceiling of 30,000 DT and repayment up to 3 years Evidence: \"avec un plafond de 30 000DT\"\n\nVisible/downloadable documents:\n- TÉLÉCHARGER LA DEMANDE DE CRÉDIT — https://atb.tn/doc/Demande-de-credit-aux-particuliers.pdf\n\nUseful for questions about:\n- Crédit Bien Être\n- health/medical loan\n- loan ceiling and duration\n\nNot enough information for:\n- interest rate\n- detailed eligibility",
+      "confidence": "high"
+    },
+    {
+      "id": "ebanking",
+      "type": "page",
+      "url": "https://atb.tn/ebanking",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "E-banking hub page. Lists ATB's remote-banking channels.",
+      "keyPoints": [
+        {
+          "point": "The E-Banking page lists ATBConnect, ATB Messenger, ATB Mobilink and ATB PAY.",
+          "evidence": "E-Banking\nATBConnect\nATB Messenger\nATB Mobilink\nATB PAY"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB e-banking services list"
+      ],
+      "notEnoughInfoFor": [
+        "subscription steps",
+        "feature details"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/ebanking\nLanguage: fr\n\nContext summary:\nE-banking hub page. Lists ATB's remote-banking channels.\n\nVerified key points:\n- The E-Banking page lists ATBConnect, ATB Messenger, ATB Mobilink and ATB PAY. Evidence: \"E-Banking\nATBConnect\nATB Messenger\nATB Mobilink\nATB PAY\"\n\nUseful for questions about:\n- ATB e-banking services list\n\nNot enough information for:\n- subscription steps\n- feature details",
+      "confidence": "medium"
+    },
+    {
+      "id": "services-mobilink",
+      "type": "page",
+      "url": "https://atb.tn/produits/services-mobilink-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Mobilink service page. Mobile top-up and phone-bill payment service for Tunisie Télécom and Ooredoo clients, debited from the ATB account, with USSD codes and subscription details.",
+      "keyPoints": [
+        {
+          "point": "Mobilink lets you top up balance and pay Tunisie Télécom phone services from your GSM, debited from the ATB account",
+          "evidence": "Mobilink vous permet de recharger votre solde, de payer vos services téléphoniques Tunisie Télécom depuis votre GSM,pour vous-même, votre famille et vos amis par le débit de votre compte ATB."
+        },
+        {
+          "point": "Subscription is free at the ATB branch, which gives a 6-digit confidential code",
+          "evidence": "L'agence vous remettra un code confidentiel composé de 6 chiffres que nous vous recommandons de changer afin de garantir la confidentialité et la sécurité de vos transactions."
+        },
+        {
+          "point": "Tunisie Télécom users access Mobilink via *137#",
+          "evidence": "En suivant les instructions sur votre GSM en appelant le numéro suivant *137#, vous verrez s'afficher sur l'écran de votre GSM le menu suivant :"
+        },
+        {
+          "point": "The service is available 24/7 across Tunisia's GSM network and even from abroad",
+          "evidence": "Service disponible 24h/24, 7j/7, n'importe où sur le territoire Tunisien couvert par le réseau GSM et même à partir de l'étranger."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB Mobilink",
+        "mobile top-up",
+        "paying phone bills",
+        "USSD codes *137# / *129#",
+        "Mobilink subscription"
+      ],
+      "notEnoughInfoFor": [
+        "fees",
+        "transaction limits"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "Télécharger la convention Mobilink",
+          "url": "https://www.atb.tn/doc/Convention-MOBILINK.pdf",
+          "filename": "Convention-MOBILINK.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/services-mobilink-presentation.php\nLanguage: fr\n\nContext summary:\nMobilink service page. Mobile top-up and phone-bill payment service for Tunisie Télécom and Ooredoo clients, debited from the ATB account, with USSD codes and subscription details.\n\nVerified key points:\n- Mobilink lets you top up balance and pay Tunisie Télécom phone services from your GSM, debited from the ATB account Evidence: \"Mobilink vous permet de recharger votre solde, de payer vos services téléphoniques Tunisie Télécom depuis votre GSM,pour vous-même, votre famille et vos amis par le débit de votre compte ATB.\"\n- Subscription is free at the ATB branch, which gives a 6-digit confidential code Evidence: \"L'agence vous remettra un code confidentiel composé de 6 chiffres que nous vous recommandons de changer afin de garantir la confidentialité et la sécurité de vos transactions.\"\n- Tunisie Télécom users access Mobilink via *137# Evidence: \"En suivant les instructions sur votre GSM en appelant le numéro suivant *137#, vous verrez s'afficher sur l'écran de votre GSM le menu suivant :\"\n- The service is available 24/7 across Tunisia's GSM network and even from abroad Evidence: \"Service disponible 24h/24, 7j/7, n'importe où sur le territoire Tunisien couvert par le réseau GSM et même à partir de l'étranger.\"\n\nVisible/downloadable documents:\n- Télécharger la convention Mobilink — https://www.atb.tn/doc/Convention-MOBILINK.pdf\n\nUseful for questions about:\n- ATB Mobilink\n- mobile top-up\n- paying phone bills\n- USSD codes *137# / *129#\n- Mobilink subscription\n\nNot enough information for:\n- fees\n- transaction limits",
+      "confidence": "high"
+    },
+    {
+      "id": "services-banque-atbconnect",
+      "type": "page",
+      "url": "https://atb.tn/produits/services-banque-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "ATB Connect online-banking page. Describes the secure 24/7 online banking service, in-branch subscription, activation email flow, and an extensive FAQ (accounts, credits, placements, transfers, beneficiaries, cards, cheques, effects, attestations, complaints, currency converter).",
+      "keyPoints": [
+        {
+          "point": "ATB Connect is ATB's complete and ergonomic online-banking service",
+          "evidence": "Conçu pour vous faciliter l’accès à vos comptes, ATB Connect est le service de banque en ligne de l'ATB, complet et ergonomique."
+        },
+        {
+          "point": "It lets you manage operations remotely securely 24/7",
+          "evidence": "Gérez vos opérations à distance en toute sécurité 24h/24 et 7j/7."
+        },
+        {
+          "point": "Subscription is done in your branch, where connection parameters are given",
+          "evidence": "Pour bénéficier du service, rendez-vous à votre agence habituelle afin de renseigner le formulaire d'abonnement et y souscrire. Vos paramètres de connexion personnels vous seront communiqués sur place."
+        },
+        {
+          "point": "Activation parameters (identifier & password) are valid for 30 days",
+          "evidence": "vous recevez un email d’activation contenant vos parametres d'activation (Identifiant & mot de passe) qui sont valides 30 jours."
+        },
+        {
+          "point": "Support number is the Customer Relations Center",
+          "evidence": "Centre de Relations Clients : 70 026 267"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB Connect",
+        "online banking",
+        "how to subscribe to ATB Connect",
+        "activation email",
+        "what can be done in ATB Connect (transfers, beneficiaries, cards, statements)",
+        "support number"
+      ],
+      "notEnoughInfoFor": [
+        "fees",
+        "mobile app store links"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "Formulaire ATB Connect",
+          "url": "https://www.atb.tn/doc/FORMULAIRE_DE_MISE_A_JOUR_ATB_CONNECT.pdf",
+          "filename": "FORMULAIRE_DE_MISE_A_JOUR_ATB_CONNECT.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/services-banque-presentation.php\nLanguage: fr\n\nContext summary:\nATB Connect online-banking page. Describes the secure 24/7 online banking service, in-branch subscription, activation email flow, and an extensive FAQ (accounts, credits, placements, transfers, beneficiaries, cards, cheques, effects, attestations, complaints, currency converter).\n\nVerified key points:\n- ATB Connect is ATB's complete and ergonomic online-banking service Evidence: \"Conçu pour vous faciliter l’accès à vos comptes, ATB Connect est le service de banque en ligne de l'ATB, complet et ergonomique.\"\n- It lets you manage operations remotely securely 24/7 Evidence: \"Gérez vos opérations à distance en toute sécurité 24h/24 et 7j/7.\"\n- Subscription is done in your branch, where connection parameters are given Evidence: \"Pour bénéficier du service, rendez-vous à votre agence habituelle afin de renseigner le formulaire d'abonnement et y souscrire. Vos paramètres de connexion personnels vous seront communiqués sur place.\"\n- Activation parameters (identifier & password) are valid for 30 days Evidence: \"vous recevez un email d’activation contenant vos parametres d'activation (Identifiant & mot de passe) qui sont valides 30 jours.\"\n- Support number is the Customer Relations Center Evidence: \"Centre de Relations Clients : 70 026 267\"\n\nVisible/downloadable documents:\n- Formulaire ATB Connect — https://www.atb.tn/doc/FORMULAIRE_DE_MISE_A_JOUR_ATB_CONNECT.pdf\n\nUseful for questions about:\n- ATB Connect\n- online banking\n- how to subscribe to ATB Connect\n- activation email\n- what can be done in ATB Connect (transfers, beneficiaries, cards, statements)\n- support number\n\nNot enough information for:\n- fees\n- mobile app store links",
+      "confidence": "high"
+    },
+    {
+      "id": "services-messenger",
+      "type": "page",
+      "url": "https://atb.tn/produits/services-messenger-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "ATB Messenger service page. Captured body only lists the remote-banking services (ATB Connect, Mobilink, ATB Messenger, ATB PAY); no descriptive text for Messenger itself.",
+      "keyPoints": [
+        {
+          "point": "ATB Messenger is one of ATB's 'banque à distance' remote-banking services",
+          "evidence": "ATB MESSENGER"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "existence of ATB Messenger"
+      ],
+      "notEnoughInfoFor": [
+        "ATB Messenger features or subscription (not in captured text)"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/services-messenger-presentation.php\nLanguage: fr\n\nContext summary:\nATB Messenger service page. Captured body only lists the remote-banking services (ATB Connect, Mobilink, ATB Messenger, ATB PAY); no descriptive text for Messenger itself.\n\nVerified key points:\n- ATB Messenger is one of ATB's 'banque à distance' remote-banking services Evidence: \"ATB MESSENGER\"\n\nUseful for questions about:\n- existence of ATB Messenger\n\nNot enough information for:\n- ATB Messenger features or subscription (not in captured text)",
+      "confidence": "low"
+    },
+    {
+      "id": "services",
+      "type": "page",
+      "url": "https://atb.tn/services",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Services listing page. Links transfer abroad, currency operations, placement and portfolio management with short teasers (some teaser texts appear mismatched to their labels on the page).",
+      "keyPoints": [
+        {
+          "point": "Offers international transfer via the international technological card for online payment in foreign currency",
+          "evidence": "Grâce à la carte technologique internationale, vous pouvez désormais régler en devises via internet..."
+        },
+        {
+          "point": "Lists currency operations, placement and portfolio management among services",
+          "evidence": "Gestion de portefeuille"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB services list",
+        "transfer abroad",
+        "portfolio management"
+      ],
+      "notEnoughInfoFor": [
+        "detailed service terms and fees"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/services\nLanguage: fr\n\nContext summary:\nServices listing page. Links transfer abroad, currency operations, placement and portfolio management with short teasers (some teaser texts appear mismatched to their labels on the page).\n\nVerified key points:\n- Offers international transfer via the international technological card for online payment in foreign currency Evidence: \"Grâce à la carte technologique internationale, vous pouvez désormais régler en devises via internet...\"\n- Lists currency operations, placement and portfolio management among services Evidence: \"Gestion de portefeuille\"\n\nUseful for questions about:\n- ATB services list\n- transfer abroad\n- portfolio management\n\nNot enough information for:\n- detailed service terms and fees",
+      "confidence": "medium"
+    },
+    {
+      "id": "services-atbpay",
+      "type": "page",
+      "url": "https://atb.tn/produits/services-ATBPAY-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "ATB PAY page. A mobile wallet for individuals and merchants: deposit/withdraw/transfer money, top-up phone, and pay merchants by QR code/TPE; includes cash-in/out at branches and ATMs.",
+      "keyPoints": [
+        {
+          "point": "ATB PAY lets smartphone holders deposit, withdraw and transfer money to pay a merchant or others",
+          "evidence": "Cette solution permet aux détenteurs de smartphones de déposer, retirer et transférer de l’argent pour payer facilement un commerçant ou autre."
+        },
+        {
+          "point": "It supports merchant payment via QR code and/or authorization code shown by a phone or TPE",
+          "evidence": "Paiement de commerçants via QR code et / ou code autorisation affiché par un téléphone ou un TPE"
+        },
+        {
+          "point": "It targets both individuals (ATB retail clients) and merchants (professional/enterprise clients)",
+          "evidence": "Commerçants : les clients professionnels et entreprises ATB destinés pour l’acceptation des paiements via un téléphone mobile et / ou un TPE disposant d’un QR code ou permettant d’interagir avec le wallet en mode sans contact."
+        },
+        {
+          "point": "Information line for ATB PAY",
+          "evidence": "(+216) 70 026 267"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB PAY wallet",
+        "mobile payment",
+        "QR code merchant payment",
+        "cash-in/cash-out",
+        "wallet transfers"
+      ],
+      "notEnoughInfoFor": [
+        "fees",
+        "wallet limits",
+        "app store links"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "TÉLÉCHARGER",
+          "url": "https://www.atb.tn/doc/Affiliation_des_commer%C3%A7ants_ATBPAY.pdf",
+          "filename": "Affiliation_des_commerçants_ATBPAY.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/services-ATBPAY-presentation.php\nLanguage: fr\n\nContext summary:\nATB PAY page. A mobile wallet for individuals and merchants: deposit/withdraw/transfer money, top-up phone, and pay merchants by QR code/TPE; includes cash-in/out at branches and ATMs.\n\nVerified key points:\n- ATB PAY lets smartphone holders deposit, withdraw and transfer money to pay a merchant or others Evidence: \"Cette solution permet aux détenteurs de smartphones de déposer, retirer et transférer de l’argent pour payer facilement un commerçant ou autre.\"\n- It supports merchant payment via QR code and/or authorization code shown by a phone or TPE Evidence: \"Paiement de commerçants via QR code et / ou code autorisation affiché par un téléphone ou un TPE\"\n- It targets both individuals (ATB retail clients) and merchants (professional/enterprise clients) Evidence: \"Commerçants : les clients professionnels et entreprises ATB destinés pour l’acceptation des paiements via un téléphone mobile et / ou un TPE disposant d’un QR code ou permettant d’interagir avec le wallet en mode sans contact.\"\n- Information line for ATB PAY Evidence: \"(+216) 70 026 267\"\n\nVisible/downloadable documents:\n- TÉLÉCHARGER — https://www.atb.tn/doc/Affiliation_des_commer%C3%A7ants_ATBPAY.pdf\n\nUseful for questions about:\n- ATB PAY wallet\n- mobile payment\n- QR code merchant payment\n- cash-in/cash-out\n- wallet transfers\n\nNot enough information for:\n- fees\n- wallet limits\n- app store links",
+      "confidence": "high"
+    },
+    {
+      "id": "services-change",
+      "type": "page",
+      "url": "https://atb.tn/produits/services-change-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Currency operations service page. Change desks in all branches for exchanging cash dinars to other currencies and foreign currency to dinars, within exchange regulations.",
+      "keyPoints": [
+        {
+          "point": "Clients and non-clients can use ATB change desks in all branches to exchange cash within exchange regulations",
+          "evidence": "Client ou non de l’ATB, vous pouvez utiliser nos desks de change présents dans toutes nos agences pour changer vos espèces en dinars en autres monnaies et vos devises en dinars , dans le cadre des opérations autorisées par la réglementation de change."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "currency exchange at ATB",
+        "change desks",
+        "exchanging cash"
+      ],
+      "notEnoughInfoFor": [
+        "exchange rates (see the devise page)",
+        "fees"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/services-change-presentation.php\nLanguage: fr\n\nContext summary:\nCurrency operations service page. Change desks in all branches for exchanging cash dinars to other currencies and foreign currency to dinars, within exchange regulations.\n\nVerified key points:\n- Clients and non-clients can use ATB change desks in all branches to exchange cash within exchange regulations Evidence: \"Client ou non de l’ATB, vous pouvez utiliser nos desks de change présents dans toutes nos agences pour changer vos espèces en dinars en autres monnaies et vos devises en dinars , dans le cadre des opérations autorisées par la réglementation de change.\"\n\nUseful for questions about:\n- currency exchange at ATB\n- change desks\n- exchanging cash\n\nNot enough information for:\n- exchange rates (see the devise page)\n- fees",
+      "confidence": "high"
+    },
+    {
+      "id": "placement",
+      "type": "page",
+      "url": "https://atb.tn/placement",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Placement (investment) hub page. Lists placement categories.",
+      "keyPoints": [
+        {
+          "point": "The placement page lists term deposits, treasury securities, SICAV range and other forms of placement.",
+          "evidence": "Placement\nLes dépôts à terme\nLes valeurs du trésor\nLa gamme des SICAV\nLes autres formes de placement"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB placement/investment options"
+      ],
+      "notEnoughInfoFor": [
+        "rates",
+        "minimums",
+        "detailed terms"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/placement\nLanguage: fr\n\nContext summary:\nPlacement (investment) hub page. Lists placement categories.\n\nVerified key points:\n- The placement page lists term deposits, treasury securities, SICAV range and other forms of placement. Evidence: \"Placement\nLes dépôts à terme\nLes valeurs du trésor\nLa gamme des SICAV\nLes autres formes de placement\"\n\nUseful for questions about:\n- ATB placement/investment options\n\nNot enough information for:\n- rates\n- minimums\n- detailed terms",
+      "confidence": "medium"
+    },
+    {
+      "id": "services-gestion",
+      "type": "page",
+      "url": "https://atb.tn/produits/services-gestion-presentation.php",
+      "title": "ATB | Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Portfolio management service page. Captured body only shows the title and cross-links to other services; no descriptive text.",
+      "keyPoints": [
+        {
+          "point": "ATB lists portfolio management among its services",
+          "evidence": "GESTION DE PORTEFEUILLE"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "existence of ATB portfolio management service"
+      ],
+      "notEnoughInfoFor": [
+        "service details or fees (not in captured text)"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: ATB | Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/produits/services-gestion-presentation.php\nLanguage: fr\n\nContext summary:\nPortfolio management service page. Captured body only shows the title and cross-links to other services; no descriptive text.\n\nVerified key points:\n- ATB lists portfolio management among its services Evidence: \"GESTION DE PORTEFEUILLE\"\n\nUseful for questions about:\n- existence of ATB portfolio management service\n\nNot enough information for:\n- service details or fees (not in captured text)",
+      "confidence": "low"
+    },
+    {
+      "id": "devenez-client",
+      "type": "page",
+      "url": "https://atb.tn/devenez_client",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Become-a-client page. Summarizes what ATB offers new clients (accounts, cards, remote banking, savings) and says becoming a client starts with choosing a branch.",
+      "keyPoints": [
+        {
+          "point": "Becoming an ATB client starts by choosing the most convenient branch",
+          "evidence": "Pour devenir client ATB, rien de plus simple :"
+        },
+        {
+          "point": "New clients get a range of bank accounts",
+          "evidence": "Une panoplie de comptes bancaires parmi lesquels vous trouverez certainement celui qui vous convient"
+        },
+        {
+          "point": "Remote banking is via ATB Connect",
+          "evidence": "Où que vous soyez et à tout moment, n'hésitez pas à consulter vos comptes à distance à travers notre service de banque en ligne ATB Connect."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "how to become an ATB client",
+        "what new clients get",
+        "opening a relationship with ATB"
+      ],
+      "notEnoughInfoFor": [
+        "required documents list on this page",
+        "online onboarding"
+      ],
+      "links": [],
+      "documents": [
+        {
+          "text": "Télécharger la liste : Agences par région",
+          "url": "https://atb.tn/doc/agences-atb.pdf",
+          "filename": "agences-atb.pdf",
+          "fileType": "pdf"
+        }
+      ],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/devenez_client\nLanguage: fr\n\nContext summary:\nBecome-a-client page. Summarizes what ATB offers new clients (accounts, cards, remote banking, savings) and says becoming a client starts with choosing a branch.\n\nVerified key points:\n- Becoming an ATB client starts by choosing the most convenient branch Evidence: \"Pour devenir client ATB, rien de plus simple :\"\n- New clients get a range of bank accounts Evidence: \"Une panoplie de comptes bancaires parmi lesquels vous trouverez certainement celui qui vous convient\"\n- Remote banking is via ATB Connect Evidence: \"Où que vous soyez et à tout moment, n'hésitez pas à consulter vos comptes à distance à travers notre service de banque en ligne ATB Connect.\"\n\nVisible/downloadable documents:\n- Télécharger la liste : Agences par région — https://atb.tn/doc/agences-atb.pdf\n\nUseful for questions about:\n- how to become an ATB client\n- what new clients get\n- opening a relationship with ATB\n\nNot enough information for:\n- required documents list on this page\n- online onboarding",
+      "confidence": "medium"
+    },
+    {
+      "id": "valeur-sicav",
+      "type": "page",
+      "url": "https://atb.tn/valeur-sicav",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "SICAV net asset value page. Lists indicative liquidative values for several SICAV funds with a last-update timestamp; values are indicative and non-contractual.",
+      "keyPoints": [
+        {
+          "point": "Publishes the liquidative (net asset) values of SICAV funds",
+          "evidence": "Valeur Liquidative des SICAV"
+        },
+        {
+          "point": "Values were last updated on 03/07/2026 at 10:02",
+          "evidence": "Dernière mise à jour le 03/07/2026 à 10:02"
+        },
+        {
+          "point": "The SICAV page lists several funds including sanadett sicav, axis trésorerie, cap oblig sicav, arab sicav, sicav security and amanett sicav.",
+          "evidence": "sanadett sicav :\n112,812\nsanadett cap :\n24,139\naxis trésorerie :\n110.738\ncap oblig sicav :\n107,058\narab sicav rachat :\n101,599\narab sicav souscription :\n102,615\nsicav security :\n20,211\namanett sicav :"
+        },
+        {
+          "point": "The published values are indicative and non-contractual",
+          "evidence": "Ces valeurs sont à titre indicatif"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "SICAV values",
+        "fund net asset values",
+        "which SICAV funds ATB lists",
+        "last update time"
+      ],
+      "notEnoughInfoFor": [
+        "historical values",
+        "how to subscribe to a SICAV"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/valeur-sicav\nLanguage: fr\n\nContext summary:\nSICAV net asset value page. Lists indicative liquidative values for several SICAV funds with a last-update timestamp; values are indicative and non-contractual.\n\nVerified key points:\n- Publishes the liquidative (net asset) values of SICAV funds Evidence: \"Valeur Liquidative des SICAV\"\n- Values were last updated on 03/07/2026 at 10:02 Evidence: \"Dernière mise à jour le 03/07/2026 à 10:02\"\n- The SICAV page lists several funds including sanadett sicav, axis trésorerie, cap oblig sicav, arab sicav, sicav security and amanett sicav. Evidence: \"sanadett sicav :\n112,812\nsanadett cap :\n24,139\naxis trésorerie :\n110.738\ncap oblig sicav :\n107,058\narab sicav rachat :\n101,599\narab sicav souscription :\n102,615\nsicav security :\n20,211\namanett sicav :\"\n- The published values are indicative and non-contractual Evidence: \"Ces valeurs sont à titre indicatif\"\n\nUseful for questions about:\n- SICAV values\n- fund net asset values\n- which SICAV funds ATB lists\n- last update time\n\nNot enough information for:\n- historical values\n- how to subscribe to a SICAV",
+      "confidence": "high"
+    },
+    {
+      "id": "simulateur-credit",
+      "type": "page",
+      "url": "https://atb.tn/simulateur-credit",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Credit simulator page. Interactive, indicative simulator across ATB's credit types, returning amount to borrow, chosen duration and installment amount.",
+      "keyPoints": [
+        {
+          "point": "The credit simulation is indicative and non-contractual",
+          "evidence": "Veuillez noter que cette simulation est fournie à titre indicatif. Elle est non contractuelle."
+        },
+        {
+          "point": "The credit simulator lists Crédit Sayara, Crédit Sakan, Crédit Mounassib, Crédit Tahawel, Crédit Renov, Crédit START and Crédit Bien être.",
+          "evidence": "Crédit Sayara\nCrédit Sakan\nCrédit Mounassib\nCrédit Tahawel\nCrédit Renov\nCrédit START\nCrédit Bien être"
+        },
+        {
+          "point": "The simulator output fields include amount to borrow, chosen duration and installment amount.",
+          "evidence": "Montant à emprunter :\t\nDurée choisie :\t\nMontant de l'échéance :"
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB credit simulator",
+        "which credits can be simulated",
+        "what the simulator outputs"
+      ],
+      "notEnoughInfoFor": [
+        "actual computed rates/installments (require interactive input, not captured)"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/simulateur-credit\nLanguage: fr\n\nContext summary:\nCredit simulator page. Interactive, indicative simulator across ATB's credit types, returning amount to borrow, chosen duration and installment amount.\n\nVerified key points:\n- The credit simulation is indicative and non-contractual Evidence: \"Veuillez noter que cette simulation est fournie à titre indicatif. Elle est non contractuelle.\"\n- The credit simulator lists Crédit Sayara, Crédit Sakan, Crédit Mounassib, Crédit Tahawel, Crédit Renov, Crédit START and Crédit Bien être. Evidence: \"Crédit Sayara\nCrédit Sakan\nCrédit Mounassib\nCrédit Tahawel\nCrédit Renov\nCrédit START\nCrédit Bien être\"\n- The simulator output fields include amount to borrow, chosen duration and installment amount. Evidence: \"Montant à emprunter :\t\nDurée choisie :\t\nMontant de l'échéance :\"\n\nUseful for questions about:\n- ATB credit simulator\n- which credits can be simulated\n- what the simulator outputs\n\nNot enough information for:\n- actual computed rates/installments (require interactive input, not captured)",
+      "confidence": "medium"
+    },
+    {
+      "id": "devise",
+      "type": "page",
+      "url": "https://atb.tn/devise",
+      "title": "Arab Tunisian Bank - البنك العربي لتونس",
+      "language": "fr",
+      "richContext": "Exchange rates page. Publishes buy/sell banknote rates in Tunisian dinar for many currencies with a last-update timestamp and a currency converter; rates concern banknote buy/sell only and are indicative.",
+      "keyPoints": [
+        {
+          "point": "Publishes buy/sell banknote exchange rates in Tunisian dinar",
+          "evidence": "Cours en dinar tunisien des billets de banque"
+        },
+        {
+          "point": "Rates were last updated Friday 3 July 2026 at 10:47",
+          "evidence": "Dernière mise à jour : vendredi 3 juillet 2026 à 10:47"
+        },
+        {
+          "point": "The exchange-rate table includes currencies such as CAD, DKK, JPY, KWD, NOK, QAR, SAR, SEK, CHF, AED, GBP, USD, EUR, BHD and LYD.",
+          "evidence": "DOLLAR CANADIEN\nCAD\n1\n2,060\n2,117\nCOURONNE DANOISE\nDKK\n100\n43,978\n45,472\nYEN JAPONAIS\nJPY\n1000\n18,166\n18,670\nDINAR KOWEITIEN\nKWD\n1\n9,489\n9,752\nCOURONNE NORVEGIENNE\nNOK\n100\n28,303\n29,264\nRYAL DE QATAR\nQAR\n10\n8,015\n8,238\nRYAL SAOUDIEN\nSAR\n10\n7,782\n7,998\nCOURONNE SUEDOISE\nSEK\n10\n2,831\n2,927\nFRANC SUISSE\nCHF\n10\n36,424\n37,435\nDIRHAM DES EAU\nAED\n10\n7,955\n8,176\nLIVRE STERLING\nGBP\n1\n3,906\n4,015\nDOLLAR DES USA\nUSD\n1\n2,924\n2,993\nEURO\nEUR\n1\n3,351\n3,430\nDINAR BAHREINI\nBHD\n1\n7,750\n7,965\nDINAR LIBYEN\nLYD\n1\n0,456\n0,469"
+        },
+        {
+          "point": "The quotes concern only banknote buy/sell transactions",
+          "evidence": "Ces cours concernent exclusivement les opérations d’achat et de vente des Billets de Banque."
+        }
+      ],
+      "usefulForQuestionsAbout": [
+        "ATB exchange rates",
+        "currency buy/sell banknote rates",
+        "currency converter",
+        "last rate update"
+      ],
+      "notEnoughInfoFor": [
+        "intraday/historical rates",
+        "rates for account/transfer operations (banknotes only)"
+      ],
+      "links": [],
+      "documents": [],
+      "forms": [],
+      "promptText": "Page: Arab Tunisian Bank - البنك العربي لتونس\nURL: https://atb.tn/devise\nLanguage: fr\n\nContext summary:\nExchange rates page. Publishes buy/sell banknote rates in Tunisian dinar for many currencies with a last-update timestamp and a currency converter; rates concern banknote buy/sell only and are indicative.\n\nVerified key points:\n- Publishes buy/sell banknote exchange rates in Tunisian dinar Evidence: \"Cours en dinar tunisien des billets de banque\"\n- Rates were last updated Friday 3 July 2026 at 10:47 Evidence: \"Dernière mise à jour : vendredi 3 juillet 2026 à 10:47\"\n- The exchange-rate table includes currencies such as CAD, DKK, JPY, KWD, NOK, QAR, SAR, SEK, CHF, AED, GBP, USD, EUR, BHD and LYD. Evidence: \"DOLLAR CANADIEN\nCAD\n1\n2,060\n2,117\nCOURONNE DANOISE\nDKK\n100\n43,978\n45,472\nYEN JAPONAIS\nJPY\n1000\n18,166\n18,670\nDINAR KOWEITIEN\nKWD\n1\n9,489\n9,752\nCOURONNE NORVEGIENNE\nNOK\n100\n28,303\n29,264\nRYAL DE QATAR\nQAR\n10\n8,015\n8,238\nRYAL SAOUDIEN\nSAR\n10\n7,782\n7,998\nCOURONNE SUEDOISE\nSEK\n10\n2,831\n2,927\nFRANC SUISSE\nCHF\n10\n36,424\n37,435\nDIRHAM DES EAU\nAED\n10\n7,955\n8,176\nLIVRE STERLING\nGBP\n1\n3,906\n4,015\nDOLLAR DES USA\nUSD\n1\n2,924\n2,993\nEURO\nEUR\n1\n3,351\n3,430\nDINAR BAHREINI\nBHD\n1\n7,750\n7,965\nDINAR LIBYEN\nLYD\n1\n0,456\n0,469\"\n- The quotes concern only banknote buy/sell transactions Evidence: \"Ces cours concernent exclusivement les opérations d’achat et de vente des Billets de Banque.\"\n\nUseful for questions about:\n- ATB exchange rates\n- currency buy/sell banknote rates\n- currency converter\n- last rate update\n\nNot enough information for:\n- intraday/historical rates\n- rates for account/transfer operations (banknotes only)",
+      "confidence": "high"
+    }
+  ],
+  "coverage": {
+    "pagesProcessed": 42,
+    "blocksCreated": 42,
+    "failedPages": 0,
+    "warnings": [
+      "All keyPoint evidence strings were validated against the corresponding Playwright renderedText.",
+      "Some broad keyPoints from the earlier draft were rewritten/split so the point does not claim more than its evidence proves.",
+      "richContext is a human-readable summary; keyPoints and evidence are the factual source of truth.",
+      "Page language field was 'unknown' for most pages in the capture; language above is inferred from the visible text and is 'fr' unless the page is clearly Arabic (ar) or English (en).",
+      "Header/nav/footer boilerplate (product menu, contact block, TARIFS/ENGAGEMENT QUALITÉ links) repeats across pages and was excluded from keyPoints except where it is the page's actual subject (home, contact, agences).",
+      "Thin pages (credit-sakan, credit-Renov, epargne-invest, services-messenger, services-gestion, banque-au-quotidien) had little unique body text in the capture and are marked low confidence with notEnoughInfoFor.",
+      "Exchange rates and SICAV values are point-in-time and non-contractual; treat numbers as of their stated update timestamps.",
+      "Screenshots were used only for visual/layout confirmation; all keyPoint evidence is copied verbatim from renderedText."
+    ],
+    "keyPoints": 123,
+    "evidenceVerified": 123,
+    "evidenceDroppedOrRewritten": 9
+  }
+}

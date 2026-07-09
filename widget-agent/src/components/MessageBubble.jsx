@@ -1,6 +1,12 @@
 import MarkdownMessage from './MarkdownMessage.jsx';
 import { useTypewriter } from '../hooks/useTypewriter.js';
 import { balanceMarkdown } from '../utils/markdownBalance.js';
+import { openHelpfulLink } from '../services/agentApi.js';
+
+// Raw source chips are dev-only now. Enable in a browser console with:
+//   window.__ATB_WIDGET_DEBUG_SOURCES = true
+const debugSourcesEnabled = () =>
+  typeof window !== 'undefined' && window.__ATB_WIDGET_DEBUG_SOURCES === true;
 
 const ACTION_LABELS = {
   confirm: 'Confirm',
@@ -96,6 +102,56 @@ function getActionLabel(action) {
   return rawLabel;
 }
 
+function SourceChips({ sources }) {
+  const shown = sources.slice(0, 3);
+  const extra = sources.length - shown.length;
+  return (
+    <div className="message-sources">
+      <span className="message-sources-label">Sources</span>
+      <div className="message-sources-chips">
+        {shown.map((source, index) =>
+          source.url ? (
+            <a
+              key={`${source.label}-${index}`}
+              className="source-chip source-chip-link"
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={source.url}
+            >
+              {source.label}
+            </a>
+          ) : (
+            <span key={`${source.label}-${index}`} className="source-chip">
+              {source.label}
+            </span>
+          ),
+        )}
+        {extra > 0 ? <span className="source-chip source-chip-more">+{extra} more</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function LinkHelper({ linkHelper }) {
+  if (!linkHelper || !linkHelper.url) return null;
+  const heading = linkHelper.lang === 'fr' ? 'Lien utile' : 'Helpful link';
+  return (
+    <div className="message-linkhelper">
+      <span className="message-linkhelper-label">{heading}</span>
+      <button
+        type="button"
+        className="linkhelper-button"
+        onClick={() => openHelpfulLink(linkHelper)}
+        title={linkHelper.url}
+      >
+        <span>{linkHelper.label}</span>
+        <span aria-hidden="true" className="linkhelper-arrow">→</span>
+      </button>
+    </div>
+  );
+}
+
 function MessageBubble({ message, onAction, animate = false }) {
   const isUser = message.role === 'user';
   const quickActions = isUser ? [] : dedupeQuickActions(message.quickActions || []);
@@ -119,6 +175,12 @@ function MessageBubble({ message, onAction, animate = false }) {
           <div className="message-content">
             {isUser ? message.content : <MarkdownMessage content={renderedContent} />}
           </div>
+          {!isUser && message.linkHelper && (!shouldAnimate || done) ? (
+            <LinkHelper linkHelper={message.linkHelper} />
+          ) : null}
+          {!isUser && debugSourcesEnabled() && Array.isArray(message.sources) && message.sources.length && (!shouldAnimate || done) ? (
+            <SourceChips sources={message.sources} />
+          ) : null}
           {smsChallenge ? (
             <form
               className="message-sms-form"
