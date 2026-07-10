@@ -17,6 +17,13 @@ const _bool = (name) =>
 const isDemoMode = () => _bool('DEMO_CONSOLE');
 const isDebugMode = () => _bool('DEBUG_AGENT_ROUTING');
 
+// Demo trace verbosity. Default 'simple' → the widget/terminal trace shows ONLY the compact
+// [ASK]/[PREP]/[RETRIEVE]/[GENERATE]/[DONE] lines (emitted via simpleStep). Set
+// DEMO_TRACE_MODE=debug (or DEBUG_AGENT_ROUTING=true) to keep every verbose stepLog line.
+// Instrumentation is untouched — this only decides which lines are printed/buffered.
+const traceMode = () => (String(process.env.DEMO_TRACE_MODE || 'simple').trim().toLowerCase() || 'simple');
+const isSimpleTrace = () => isDemoMode() && traceMode() === 'simple' && !isDebugMode();
+
 // Stores the current traceId for the async execution chain (request or job).
 const _traceCtx = new AsyncLocalStorage();
 
@@ -37,10 +44,28 @@ function _ts() {
  * async context (set via runWithTrace) or supplied via { jobId }.
  */
 function stepLog(label, message, { jobId } = {}) {
+  // Simple demo trace: hide every verbose/legacy step line. The compact [TAG] lines
+  // (simpleStep) become the only trace. Full lines still print in debug / non-demo.
+  if (isSimpleTrace()) return;
   const line = `[${_ts()}] ${label}: ${message}`;
   console.log(`[DEMO] ${line}`);
 
   // Resolve traceId: async context first (request chain), jobId mapping second (browser jobs).
+  const traceId = _traceCtx.getStore() || (jobId ? getTraceIdForJob(jobId) : null);
+  if (traceId) appendTrace(traceId, line);
+}
+
+/**
+ * simpleStep — compact, bracketed trace line printed ONLY in simple demo mode.
+ *   simpleStep('PREP', 'lang=fr embedding=bge-m3 embeddingMs=5037')
+ *   → [DEMO] [PREP] lang=fr embedding=bge-m3 embeddingMs=5037
+ * No timestamp/label colon (kept intentionally short for the demo widget). In debug or
+ * non-demo mode it is a no-op, so call sites can emit both stepLog (full) and simpleStep.
+ */
+function simpleStep(tag, message, { jobId } = {}) {
+  if (!isSimpleTrace()) return;
+  const line = `[${tag}] ${message}`;
+  console.log(`[DEMO] ${line}`);
   const traceId = _traceCtx.getStore() || (jobId ? getTraceIdForJob(jobId) : null);
   if (traceId) appendTrace(traceId, line);
 }
@@ -84,4 +109,4 @@ function errorLog(label, message, err) {
   }
 }
 
-module.exports = { isDemoMode, isDebugMode, stepLog, debugLog, errorLog, runWithTrace };
+module.exports = { isDemoMode, isDebugMode, isSimpleTrace, traceMode, stepLog, simpleStep, debugLog, errorLog, runWithTrace };

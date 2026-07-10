@@ -362,6 +362,8 @@ function _callQwen(userContent, system = SYNTHESIS_SYSTEM) {
     // think:false disables qwen3 reasoning — required, else format:'json' returns
     // empty content (reasoning tokens consume the response). /no_think is a belt-and-braces.
     think: false,
+    // keep_alive keeps qwen3:14b resident so it is not evicted between requests (cold reload ~25-30s).
+    keep_alive: process.env.OLLAMA_KEEP_ALIVE || '30m',
     stream: false, format: 'json', options: { temperature: 0, num_predict: 400 },
   });
   return new Promise((resolve, reject) => {
@@ -444,13 +446,17 @@ async function synthesizeAnswer(question, { askBlocks = [], catalogEntries = [],
   diag.called = true;
   const system = SYNTHESIS_SYSTEM + _languageClause(responseLanguage);
   let raw;
+  const _qwenStart = Date.now();
   try {
     raw = await callModel(pack, system);
   } catch (e) {
+    diag.qwenMs = Date.now() - _qwenStart;
     diag.success = false;
     diag.failedReason = /timeout/i.test(e && e.message) ? 'ollama_timeout' : 'ollama_unreachable';
     return null; // timeout / connection refused / parse error → deterministic fallback
   }
+  diag.qwenMs = Date.now() - _qwenStart;
+  const _valStart = Date.now();
   const parsed = _parseModelJson(raw);
   const modelAnswer = parsed && typeof parsed.answer === 'string' ? parsed.answer.trim() : '';
   if (!modelAnswer) { diag.success = false; diag.failedReason = 'empty_model_response'; return null; }
@@ -463,9 +469,11 @@ async function synthesizeAnswer(question, { askBlocks = [], catalogEntries = [],
 
   // Anti-hallucination guard: unsupported numbers/emails → discard, fall back.
   if (!answerIsSupported(modelAnswer, _evidenceCorpus(askBlocks, catalogEntries))) {
+    diag.validationMs = Date.now() - _valStart;
     diag.success = false; diag.guardRejected = true; diag.failedReason = 'guard_rejected_unsupported_facts';
     return null;
   }
+  diag.validationMs = Date.now() - _valStart;
   diag.success = true;
 
   // We always append the deterministic, correctly-labeled sources (req 6).

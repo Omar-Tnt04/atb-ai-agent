@@ -345,7 +345,11 @@ const analyzeMessage = async ({
     requestPayload = trimmed.payload;
     contextCharsBefore = trimmed.contextCharsBefore;
     contextCharsAfter = trimmed.contextCharsAfter;
-    const response = await axios.post(`${env.aiServiceUrl}/agent/analyze`, requestPayload);
+    // Bounded timeout so a stale/hung Python AI service (:8000) can never block the whole
+    // request during the demo. On timeout axios throws ECONNABORTED → same catch/fallback
+    // path as any other AI-service error (behavior unchanged when the service is healthy).
+    const aiTimeoutMs = parseInt(process.env.AI_TEXT_TIMEOUT_MS || '15000', 10);
+    const response = await axios.post(`${env.aiServiceUrl}/agent/analyze`, requestPayload, { timeout: aiTimeoutMs });
     logArchitecture('ai_text_flow_finished', {
       requestId,
       threadId,
@@ -425,7 +429,10 @@ const decideMessage = async ({
     requestPayload = trimmed.payload;
     contextCharsBefore = trimmed.contextCharsBefore;
     contextCharsAfter = trimmed.contextCharsAfter;
-    const response = await axios.post(`${env.aiServiceUrl}/agent/decide`, requestPayload);
+    // Bounded timeout — see analyzeMessage. Prevents a hung :8000 from blocking the demo;
+    // timeout → ECONNABORTED → existing catch/fallback. No change on the healthy path.
+    const aiTimeoutMs = parseInt(process.env.AI_TEXT_TIMEOUT_MS || '15000', 10);
+    const response = await axios.post(`${env.aiServiceUrl}/agent/decide`, requestPayload, { timeout: aiTimeoutMs });
     logArchitecture('ai_decide_finished', {
       requestId,
       threadId,
@@ -511,7 +518,10 @@ const planIntent = async ({
     requestPayload = trimmed.payload;
     contextCharsBefore = trimmed.contextCharsBefore;
     contextCharsAfter = trimmed.contextCharsAfter;
-    const response = await axios.post(`${env.aiServiceUrl}/agent/plan`, requestPayload);
+    // Bounded timeout: the Python planner is a legacy fallback and is NOT started in the
+    // hosted-browser demo. Without this, a stale/hung :8000 could block the whole request.
+    const planTimeoutMs = parseInt(process.env.PY_PLAN_TIMEOUT_MS || '5000', 10);
+    const response = await axios.post(`${env.aiServiceUrl}/agent/plan`, requestPayload, { timeout: planTimeoutMs });
     logArchitecture('intent_planner_finished', {
       requestId,
       threadId,

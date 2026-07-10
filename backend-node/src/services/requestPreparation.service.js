@@ -35,11 +35,13 @@ async function prepareUserRequest({ message, domain = targetDomain(), modeHint =
     embeddingModel: embedModel(),
     embeddingOk: false,
     embeddingError: '',
+    embedMs: 0,
     debug: { ...(norm.debug || {}), modeHint, domain, wantEmbed },
   };
 
   if (!wantEmbed || !norm.originalQuestion.trim()) return prepared;
 
+  const _embedStart = Date.now();
   try {
     // Embed the ORIGINAL text (accents kept) so the vector matches the ASK/ACT chunk
     // embeddings and the standalone retrieve() path exactly.
@@ -53,6 +55,7 @@ async function prepareUserRequest({ message, domain = targetDomain(), modeHint =
   } catch (e) {
     prepared.embeddingError = /timeout/i.test(e && e.message) ? 'embed_timeout' : 'embed_failed';
   }
+  prepared.embedMs = Date.now() - _embedStart;
   return prepared;
 }
 

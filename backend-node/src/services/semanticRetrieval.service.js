@@ -65,7 +65,9 @@ function _ollama(endpoint, payload, timeoutMs) {
 async function embed(texts) {
   const input = Array.isArray(texts) ? texts : [texts];
   const timeoutMs = parseInt(process.env.ASK_EMBEDDING_TIMEOUT_MS || '120000', 10);
-  const out = await _ollama('/api/embed', { model: EMBED_MODEL(), input }, timeoutMs);
+  // keep_alive keeps bge-m3 resident so it is not evicted between requests (cold reload ~8s).
+  const keepAlive = process.env.OLLAMA_KEEP_ALIVE || '30m';
+  const out = await _ollama('/api/embed', { model: EMBED_MODEL(), input, keep_alive: keepAlive }, timeoutMs);
   const embeddings = out && out.embeddings;
   if (!Array.isArray(embeddings) || embeddings.length !== input.length) {
     throw new Error('embed: unexpected response shape');

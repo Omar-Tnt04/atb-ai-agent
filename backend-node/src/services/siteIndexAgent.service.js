@@ -859,6 +859,8 @@ async function _callOllama(message, systemPrompt) {
     ],
     stream: false,
     format: 'json',
+    // keep_alive keeps the ACT intent model (gemma4:e4b) resident between requests.
+    keep_alive: process.env.OLLAMA_KEEP_ALIVE || '30m',
     options: { temperature: 0, num_predict: 160 },
   });
 

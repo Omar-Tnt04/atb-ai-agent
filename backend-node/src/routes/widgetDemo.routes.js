@@ -31,7 +31,7 @@ const _DOC_INDEX_GOALS = new Set([
 const env = require('../config/env');
 const { getGeneratedFile } = require('../services/generatedFile.service');
 const { routeTraceMiddleware, isVerboseRequestLog } = require('../services/routeTrace.service');
-const { isDemoMode, stepLog, runWithTrace } = require('../utils/demoLogger');
+const { isDemoMode, stepLog, simpleStep, runWithTrace } = require('../utils/demoLogger');
 const { createTrace, getTrace, markTraceDone } = require('../services/traceBuffer.service');
 const { SOURCE_TYPES, detectSourceType, buildContactFactsAnswer } = require('../services/askRetrieval.service');
 const { retrieveAskContextBlocks, buildCombinedAnswerLLM, NOT_ENOUGH_INFO } = require('../services/askContext.service');
@@ -96,6 +96,42 @@ const widgetDemoGuard = (req, res, next) => {
 router.use(widgetDemoGuard);
 router.use(routeTraceMiddleware);
 
+// TRUTHFUL PER-REQUEST TIMING — first middleware. Stamps a short requestId, records
+// phase durations (only phases that actually ran are printed — no faked/unused phases),
+// and on response emits a compact Timing block + names the real bottleneck.
+// Sub-times from services: embeddingMs (prepared.embedMs), qwenSynthesisMs / answerValidationMs
+// (synthesis diag). Pure instrumentation — never changes routing or answer content.
+const withTiming = (req, res, next) => {
+  const t = { start: Date.now(), last: Date.now(), id: Math.random().toString(36).slice(2, 8), phases: {} };
+  req._timing = t;
+  req._mark = (name) => { const now = Date.now(); t.phases[name] = now - t.last; t.last = now; };
+  const origJson = res.json.bind(res);
+  res.json = (body) => {
+    const totalMs = Date.now() - t.start;
+    const p = req._preparedRequest;
+    if (p && typeof p.embedMs === 'number') t.phases.embeddingMs = p.embedMs;
+    const d = req._synthDiag || {};
+    if (typeof d.qwenMs === 'number') t.phases.qwenSynthesisMs = d.qwenMs;
+    if (typeof d.validationMs === 'number') t.phases.validationMs = d.validationMs;
+    const entries = Object.entries(t.phases);
+    const top = entries.slice().sort((a, b) => b[1] - a[1])[0];
+    const bottleneck = top ? `${top[0]}(${top[1]}ms)` : 'n/a';
+    const finalRoute = req._finalRoute || '(none)';
+    const msg = String(req.body?.message || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    // Surface the key ASK metrics in a fixed, readable order; append any other phases after.
+    const NAMED = ['embeddingMs', 'semanticRetrievalMs', 'catalogRetrievalMs', 'qwenSynthesisMs', 'validationMs'];
+    const namedStr = NAMED.filter((k) => typeof t.phases[k] === 'number').map((k) => `${k}=${t.phases[k]}`).join(' ');
+    const restStr = entries.filter(([k]) => !NAMED.includes(k)).map(([k, v]) => `${k}=${v}`).join(' ');
+    const line =
+      `RequestId=${t.id} User="${msg}" totalMs=${totalMs} finalRoute=${finalRoute} ` +
+      `bottleneck=${bottleneck}` + (namedStr ? ` ${namedStr}` : '') + (restStr ? ` ${restStr}` : '');
+    if (isDemoMode()) stepLog('Timing', line);
+    else console.log(`[TIMING] ${line}`);
+    return origJson(body);
+  };
+  return next();
+};
+
 // First-line proof that a widget request reached THIS process/handler (before any routing logic).
 const logWidgetRequestEntered = (req, res, next) => {
   if (isVerboseRequestLog()) {
@@ -144,8 +180,9 @@ const withIntentPreclassify = (req, res, next) => {
   req._intentClass = classifyIntent(message, { siteContextUrl });
   const { type, confidence, target } = req._intentClass;
   if (isDemoMode()) {
+    // Legacy deterministic pre-classifier — kept for observation, does NOT drive routing.
     const targetStr = target ? ` target="${target.slice(0, 40)}"` : '';
-    stepLog('Intent', `${type}${targetStr}`);
+    stepLog('LegacyPreRouting', `${type}${targetStr}`);
   } else {
     const targetStr = target ? ` target="${target.slice(0, 40)}"` : '';
     console.log(`[INTENT_PRECLASSIFY] type=${type} confidence=${confidence.toFixed(2)}${targetStr}`);
@@ -172,7 +209,8 @@ const withAgentPlan = (req, res, next) => {
   req._agentPlan = buildAgentPlan(req);
   const { executorType, selectedRoute, confidence } = req._agentPlan;
   if (isDemoMode()) {
-    stepLog('Plan', `executor=${executorType} route=${selectedRoute}`);
+    // Legacy deterministic planner — observation only, does NOT drive routing.
+    stepLog('LegacyPlan', `executor=${executorType} route=${selectedRoute}`);
   } else {
     console.log(`[AGENT_PLAN] executor=${executorType} route=${selectedRoute} confidence=${confidence.toFixed(2)}`);
   }
@@ -186,11 +224,14 @@ const withAgentPlan = (req, res, next) => {
 const withRequestPreparation = async (req, res, next) => {
   const message = String(req.body?.message || '').trim();
   const agentMode = String(req.body?.mode || req.body?.agentMode || 'ask').toLowerCase();
+  // Everything before this point = legacy pre-routing (preclassify/context/plan middlewares).
+  if (req._mark) req._mark('preRoutingMs');
   try {
     req._preparedRequest = message ? await prepareUserRequest({ message, modeHint: agentMode }) : null;
   } catch {
     req._preparedRequest = null;
   }
+  if (req._mark) req._mark('requestPreparationMs');
   // Expose per project convention (both req.agentContext and res.locals).
   req.agentContext = { ...(req.agentContext || {}), preparedRequest: req._preparedRequest };
   res.locals.preparedRequest = req._preparedRequest;
@@ -199,9 +240,12 @@ const withRequestPreparation = async (req, res, next) => {
   if (p) {
     const line =
       `normalizedText="${p.normalizedText.slice(0, 60)}" detectedLanguage=${p.detectedLanguage} ` +
-      `responseLanguage=${p.responseLanguage} embeddingModel=${p.embeddingModel} embeddingOk=${p.embeddingOk}`;
+      `responseLanguage=${p.responseLanguage} embeddingModel=${p.embeddingModel} embeddingOk=${p.embeddingOk} ` +
+      `embeddingMs=${p.embedMs}`;
     if (isDemoMode()) stepLog('PreparedRequest', line);
     else console.log(`[PREPARED_REQUEST] ${line}`);
+    // Compact simple-mode line (no-op unless DEMO_TRACE_MODE=simple).
+    simpleStep('PREP', `lang=${p.responseLanguage} embedding=${p.embeddingModel} embeddingMs=${p.embedMs}`);
   }
   return next();
 };
@@ -284,6 +328,8 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
     // Emit clean User line; Route/Decision are emitted later by the site-index agent.
     stepLog('User', `"${message.slice(0, 80).replace(/"/g, "'")}"`);
     stepLog('Mode', isAskMode ? 'Ask question' : 'Act on site');
+    // Compact simple-mode entry line (no-op unless DEMO_TRACE_MODE=simple).
+    simpleStep(isAskMode ? 'ASK' : 'ACT', `"${message.slice(0, 80).replace(/"/g, "'")}"`);
     const cacheCtx = req.body?.cacheContext || {};
     if (cacheCtx.contactHit != null) {
       stepLog('Cache', cacheCtx.contactHit ? 'contact info hit' : 'contact info refreshed');
@@ -320,6 +366,14 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
       `reason="${isBrowserAgent && !isAskMode ? 'site navigation request' : isAskMode ? 'ask mode' : 'not a site navigation request'}"`,
     );
   }
+
+  // Compact simple-mode ACT trace (no-op unless DEMO_TRACE_MODE=simple). Emits the
+  // [NAVIGATE] + [DONE] pair at each ACT dispatch point.
+  const _actTrace = (route, action, extra = '') => {
+    simpleStep('NAVIGATE', `route=${route}${extra ? ` ${extra}` : ''}`);
+    const _t = req._timing ? Date.now() - req._timing.start : 0;
+    simpleStep('DONE', `success totalMs=${_t} action=${action}`);
+  };
 
   // ASK MODE — skip all browser routing; deflect ONLY a pure imperative command
   // (e.g. "Download the form for me"), never an informational question that merely
@@ -388,6 +442,7 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
           linkText: _preAction.type === 'navigate_then_download' ? (_preAction.highlightText || '') : '',
           traceId:  req.traceId,
         });
+        _actTrace('site_index', 'open_document', `target=document score=${_preDecision.confidence.toFixed(2)}`);
         return res.json({ success: true, status: 'browser_agent_queued', jobId: _preJobId });
       }
       // Site index found no document — fall through to normal pageControl
@@ -399,6 +454,7 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
   if (hasSnapshot && isPageControlTask(message)) {
     const goalState = req.body?.pageGoalState || null;
     const plan = buildPagePlan(message, snapshot, goalState);
+    simpleStep('DONE', `success totalMs=${req._timing ? Date.now() - req._timing.start : 0} action=page_control`);
     return res.json({
       success: true,
       assistantMessage: plan.answer,
@@ -417,12 +473,14 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
   // fall through to the existing site-index keyword decision (emergency fallback only).
   if (/^(1|true|yes|on)$/i.test(String(process.env.ACT_USE_SEMANTIC_NAVIGATION || ''))) {
     const _prep = req._preparedRequest || null;
+    const _navStart = Date.now();
     const nav = await semanticSearchNavigation({
       normalizedQuestion: _prep ? _prep.normalizedText : message,
       queryEmbedding: _prep && _prep.embeddingOk ? _prep.embedding : null,
       topK: parseInt(process.env.ACT_SEMANTIC_TOP_K || '5', 10),
       minScore: parseFloat(process.env.ACT_SEMANTIC_MIN_SCORE || '0.45'),
     });
+    const _navMs = Date.now() - _navStart;
     const top = nav.topMatch;
     const navLine =
       `enabled=true reusedPreparedEmbedding=${nav.reusedEmbedding} ok=${nav.ok} confident=${nav.confident} chunks=${nav.chunkCount} ` +
@@ -449,6 +507,7 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
       } else {
         console.log(`[ACT_FALLBACK] semanticPrimary=true fallbackUsed=false fallbackType=none`);
       }
+      _actTrace('semantic_navigation', isDoc ? 'open_document' : 'open_page', `target=${top.sourceType} score=${top.finalScore} retrievalMs=${_navMs}`);
       const jobId = isDoc
         ? createDocFastPathJob({ title: top.title, pageUrl: top.sourcePageUrl || null, docUrl: top.url, traceId: req.traceId })
         : createPageFastPathJob({ title: top.title, pageUrl: top.url, traceId: req.traceId });
@@ -502,6 +561,9 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
           `Direct link: ${navTargetUrl}`,
       });
     }
+    // Compact simple-mode trace for the keyword site-index dispatch (no-op unless simple).
+    const _actLabel = (action.type === 'navigate' || action.type === 'navigate_then_click') ? 'open_page' : 'open_document';
+    _actTrace('site_index', _actLabel, `target=${action.type} score=${decision.confidence.toFixed(2)}`);
   }
 
   switch (action.type) {
@@ -558,6 +620,7 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
     case 'suggestions':
     case 'not_found':
     default:
+      simpleStep('DONE', `success totalMs=${req._timing ? Date.now() - req._timing.start : 0} action=answer`);
       return res.json({ success: true, assistantMessage: decision.answer });
   }
 };
@@ -611,6 +674,7 @@ const handleAskContextRetrieval = async (req, res, next) => {
       enabled: false, model: '', indexPath: '', indexLoaded: false, indexBuilt: false,
       chunkCount: 0, topMatches: [], fallbackUsed: false, failedReason: '', reusedPreparedEmbedding: false,
     };
+    const _semStart = Date.now();
     const useSemantic = /^(1|true|yes|on)$/i.test(String(process.env.ASK_USE_SEMANTIC_RETRIEVAL || ''));
     if (useSemantic) {
       sem.enabled = true;
@@ -647,10 +711,15 @@ const handleAskContextRetrieval = async (req, res, next) => {
         retrieveCatalogEntries(message),
       ]);
     }
+    const _retrievalMs = Date.now() - _semStart;
+    if (req._timing) {
+      req._timing.phases[sem.enabled && !sem.fallbackUsed ? 'semanticRetrievalMs' : 'catalogRetrievalMs'] = _retrievalMs;
+    }
 
     // LLM synthesis when ASK_USE_LLM_SYNTHESIS=true (sends only selected evidence to
     // qwen3:14b, answering in responseLanguage), else deterministic. Fallback automatic.
     const _synthDiag = {};
+    req._synthDiag = _synthDiag; // exposed to withTiming for qwenSynthesisMs / answerValidationMs
     const result = await buildCombinedAnswerLLM(message, {
       askBlocks, catalogEntries, diag: _synthDiag, responseLanguage: norm.responseLanguage,
     });
@@ -717,10 +786,20 @@ const handleAskContextRetrieval = async (req, res, next) => {
       }
     }
     if (result.answered) {
+      req._finalRoute = sem.enabled && !sem.fallbackUsed ? 'semantic_retrieval' : 'ask_context+catalog';
       if (isDemoMode()) {
-        stepLog('Route', sem.enabled && !sem.fallbackUsed ? 'semantic_retrieval' : 'ask_context+catalog');
+        const _routeLabel = sem.enabled && !sem.fallbackUsed ? 'semantic_retrieval' : 'ask_context+catalog';
+        stepLog('Route', `${_routeLabel} retrievalMs=${_retrievalMs}`);
         const synthesisMode = result.synthesized ? 'qwen_synthesis' : 'deterministic';
-        stepLog('Synthesis', synthesisMode);
+        const _qwenMs = typeof _synthDiag.qwenMs === 'number' ? _synthDiag.qwenMs : 0;
+        stepLog('Synthesis', `${synthesisMode} qwenSynthesisMs=${_qwenMs}`);
+        // Compact simple-mode lines (no-op unless DEMO_TRACE_MODE=simple).
+        const _top =
+          (askBlocks[0] && (askBlocks[0].block.id || askBlocks[0].block.url)) ||
+          (catalogEntries[0] && (catalogEntries[0].id || catalogEntries[0].title)) ||
+          (sem.topMatches[0] && sem.topMatches[0].sourceId) || '(none)';
+        simpleStep('RETRIEVE', `source=ask-context+catalog route=${_routeLabel} retrievalMs=${_retrievalMs} top=${_top}`);
+        simpleStep('GENERATE', `model=${result.synthesized ? _synthDiag.model : 'deterministic'} qwenMs=${_qwenMs} evidence=${askBlocks.length + catalogEntries.length}`);
         stepLog('SynthesisDiag', `qwenCalled=${!!_synthDiag.called} success=${!!_synthDiag.success} semanticEnabled=${!!sem.enabled} evidence=${askBlocks.length + catalogEntries.length} lang=${norm.responseLanguage}`);
         if (!result.synthesized && _synthDiag.enabled) {
           stepLog('DeterministicReason', _synthDiag.failedReason || (_synthDiag.guardRejected ? 'guard_rejected' : 'unknown'));
@@ -729,7 +808,13 @@ const handleAskContextRetrieval = async (req, res, next) => {
         stepLog('CatalogHits', catalogEntries.map((e) => `${e.id || e.title}~${e.score.toFixed(2)}`).join(' | ').slice(0, 120) || '(none)');
         stepLog('Sources', result.sources.slice(0, 4).join(' | ').slice(0, 140) || '(none)');
         stepLog('Answer', result.answer.slice(0, 100).replace(/\n/g, ' '));
-        stepLog('Done', `success — ${result.synthesized ? 'qwen3 synthesis' : 'deterministic'} answer from ask-context + catalog evidence`);
+        const _embMs = req._preparedRequest && typeof req._preparedRequest.embedMs === 'number' ? req._preparedRequest.embedMs : 0;
+        const _totalMs = req._timing ? Date.now() - req._timing.start : 0;
+        const _bneck = [['embedding', _embMs], ['retrieval', _retrievalMs], ['qwenSynthesis', _qwenMs]]
+          .sort((a, b) => b[1] - a[1])[0];
+        stepLog('Done', `success totalMs=${_totalMs} bottleneck=${_bneck[0]} — ${result.synthesized ? 'qwen3 synthesis' : 'deterministic'} answer from ask-context + catalog evidence`);
+        const _bneckName = { qwenSynthesis: _synthDiag.model || 'qwen3:14b', embedding: 'bge-m3', retrieval: 'retrieval' };
+        simpleStep('DONE', `success totalMs=${_totalMs} bottleneck=${_bneckName[_bneck[0]] || _bneck[0]}`);
       }
       return res.json({ success: true, assistantMessage: result.answer });
     }
@@ -978,7 +1063,7 @@ const handleBrowserAgentJobStatus = (req, res) => {
   });
 };
 
-router.post('/chat', logWidgetRequestEntered, withTrace, withConversationContext, withIntentPreclassify, withRequestContext, withAgentPlan, withRequestPreparation, withAskDebugTrace, handleBrowserTaskOrDelegate, handleAskContextRetrieval, handleAskEvidenceResolver, handleAskRetrieval, handleAskTerminalGuard, handleChatMessage);
+router.post('/chat', withTiming, logWidgetRequestEntered, withTrace, withConversationContext, withIntentPreclassify, withRequestContext, withAgentPlan, withRequestPreparation, withAskDebugTrace, handleBrowserTaskOrDelegate, handleAskContextRetrieval, handleAskEvidenceResolver, handleAskRetrieval, handleAskTerminalGuard, handleChatMessage);
 router.post('/browser-agent/:jobId/start', handleBrowserAgentJobStart);
 router.get('/browser-agent/:jobId', handleBrowserAgentJobStatus);
 
