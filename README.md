@@ -58,6 +58,10 @@ Current demo file:
 site-context/atb.tn/site-index.json
 ```
 
+
+## Simple flow diagram
+
+![Generic Website AI Agent simple flow](docs/assets/architecture-simple-flow.png)
 ## High-level architecture
 
 ```text
@@ -311,3 +315,4 @@ serve widget frontend
   ?
 inject with extension for demo or script tag for production
 ```
+
