@@ -241,12 +241,25 @@ function buildAskContextAnswer(question, { domain } = {}) {
  *        from catalogRetrieval.service.retrieveCatalogEntries
  * Returns { answered, answer, sources }.
  */
-function buildCombinedAnswer(question, { askBlocks = [], catalogEntries = [] } = {}) {
+function buildCombinedAnswer(question, { askBlocks = [], catalogEntries = [], exactEvidence = [] } = {}) {
   const lines = [];
   const sources = [];
 
+  // ── ask-exact-context.json evidence (highest priority, verbatim) ──────────
+  if ((exactEvidence || []).length > 0) {
+    for (const e of exactEvidence.slice(0, 3)) {
+      const label = e.title || e.blockId || 'page';
+      for (const c of (e.chunks || []).slice(0, 2)) {
+        lines.push(`- ${String(c).slice(0, 300)}`);
+      }
+      lines.push(`  Source: ask-exact-context.json${e.url ? ` — ${e.url}` : ''}`);
+      sources.push(`ask-exact-context.json:${e.url || label}`);
+    }
+  }
+
   // ── ask-context.json evidence ────────────────────────────────────────────
   if (askBlocks.length > 0) {
+    if (lines.length) lines.push('');
     const web = buildGroundedAnswer(question, askBlocks);
     if (web) {
       // buildGroundedAnswer already appends its own "Source: <url>" line.
@@ -297,6 +310,10 @@ const SYNTHESIS_SYSTEM =
   'Do NOT put sources, URLs or citations in the answer body (they are shown separately). ' +
   'Do NOT copy internal context summaries or page headings such as "Complaints page", ' +
   '"Context summary" or similar — write a natural user-facing answer. ' +
+  // Long lists (e.g. a full agency directory): summarize, do not dump.
+  'If the evidence contains a long list (e.g. many agencies grouped by region), do NOT ' +
+  'reproduce the whole list — confirm it exists, give a few grouped examples, and say the ' +
+  'full list is available on the page. ' +
   'Return strict JSON only: {"answer":"..."}';
 
 // Per-call language directive + localized style rules appended to the system prompt.
@@ -317,7 +334,14 @@ function _languageClause(responseLanguage) {
 }
 
 // Compact evidence pack — the ONLY site/catalog data the model ever sees.
-function buildEvidencePack(question, askBlocks, catalogEntries) {
+// exactEvidence (verbatim page chunks) is listed FIRST so the model treats it as the
+// highest-priority ground truth for product/service/detail pages.
+function buildEvidencePack(question, askBlocks, catalogEntries, exactEvidence = []) {
+  const exact = (exactEvidence || []).slice(0, 3).map((e) => ({
+    title: e.title || '', url: e.url || '',
+    // Verbatim chunks, capped so the pack can't bloat and time qwen out.
+    exactChunks: (e.chunks || []).slice(0, 3).map((c) => String(c || '').replace(/\s+/g, ' ').slice(0, 900)),
+  }));
   const web = askBlocks.map(({ block }) => ({
     title: block.title || '',
     url: block.url || '',
@@ -334,13 +358,15 @@ function buildEvidencePack(question, askBlocks, catalogEntries) {
     // Real file content (loaded by catalogRetrieval) up to ~1000 chars — the checklist etc.
     evidence: String(e.evidence || e.description || '').replace(/\s+/g, ' ').slice(0, 1000),
   }));
-  return JSON.stringify({ question, askContextEvidence: web, catalogEvidence: catalog });
+  return JSON.stringify({ question, exactEvidence: exact, askContextEvidence: web, catalogEvidence: catalog });
 }
 
 // The deterministic source lines (req 6). Appended by us regardless of the model,
 // so sources are always present and correctly labeled.
-function formatSourceLines(askBlocks, catalogEntries) {
+function formatSourceLines(askBlocks, catalogEntries, exactEvidence = []) {
   const lines = [];
+  const exactUrls = (exactEvidence || []).map((e) => e.url).filter(Boolean).slice(0, 3);
+  if (exactUrls.length) lines.push(`Source: ask-exact-context.json — ${exactUrls.join(' | ')}`);
   const urls = askBlocks.map(({ block }) => block.url).filter(Boolean).slice(0, 3);
   if (urls.length) lines.push(`Source: ask-context.json — ${urls.join(' | ')}`);
   for (const e of catalogEntries.slice(0, 4)) {
@@ -392,8 +418,11 @@ function _parseModelJson(raw) {
 }
 
 // All evidence text the model was allowed to use (for the anti-hallucination guard).
-function _evidenceCorpus(askBlocks, catalogEntries) {
+function _evidenceCorpus(askBlocks, catalogEntries, exactEvidence = []) {
   const parts = [];
+  // Exact chunks must be in the corpus or the anti-hallucination guard would reject
+  // correct numbers taken from them (e.g. "80%", "200 000 DT").
+  for (const e of exactEvidence || []) { parts.push(e.title); for (const c of e.chunks || []) parts.push(c); }
   for (const { block } of askBlocks) {
     parts.push(block.title, block.richContext, block.promptText);
     for (const k of block.keyPoints || []) parts.push(k.point, k.evidence);
@@ -435,13 +464,15 @@ function modelSaysNoEvidence(answer) {
  * Returns a string (answer + source lines) on success, or null to signal fallback.
  * `callModel` is injectable for tests (defaults to the local qwen3 client).
  */
-async function synthesizeAnswer(question, { askBlocks = [], catalogEntries = [], callModel = _callQwen, diag = {}, responseLanguage } = {}) {
+async function synthesizeAnswer(question, { askBlocks = [], catalogEntries = [], exactEvidence = [], callModel = _callQwen, diag = {}, responseLanguage } = {}) {
   diag.model = process.env.ASK_SYNTHESIS_MODEL || 'qwen3:14b';
-  if (askBlocks.length === 0 && catalogEntries.length === 0) {
+  if (askBlocks.length === 0 && catalogEntries.length === 0 && exactEvidence.length === 0) {
     diag.called = false; diag.success = false; diag.failedReason = 'no_evidence';
     return null;
   }
-  const pack = buildEvidencePack(question, askBlocks, catalogEntries);
+  diag.exactBlocksUsed = exactEvidence.length;
+  diag.exactChunksUsed = exactEvidence.reduce((n, e) => n + (e.chunks ? e.chunks.length : 0), 0);
+  const pack = buildEvidencePack(question, askBlocks, catalogEntries, exactEvidence);
   diag.totalCharsSentToModel = pack.length;
   diag.called = true;
   const system = SYNTHESIS_SYSTEM + _languageClause(responseLanguage);
@@ -468,7 +499,7 @@ async function synthesizeAnswer(question, { askBlocks = [], catalogEntries = [],
   }
 
   // Anti-hallucination guard: unsupported numbers/emails → discard, fall back.
-  if (!answerIsSupported(modelAnswer, _evidenceCorpus(askBlocks, catalogEntries))) {
+  if (!answerIsSupported(modelAnswer, _evidenceCorpus(askBlocks, catalogEntries, exactEvidence))) {
     diag.validationMs = Date.now() - _valStart;
     diag.success = false; diag.guardRejected = true; diag.failedReason = 'guard_rejected_unsupported_facts';
     return null;
@@ -477,7 +508,7 @@ async function synthesizeAnswer(question, { askBlocks = [], catalogEntries = [],
   diag.success = true;
 
   // We always append the deterministic, correctly-labeled sources (req 6).
-  const sourceLines = formatSourceLines(askBlocks, catalogEntries);
+  const sourceLines = formatSourceLines(askBlocks, catalogEntries, exactEvidence);
   return [modelAnswer, sourceLines.length ? '' : null, ...sourceLines].filter((l) => l !== null).join('\n').trim();
 }
 
@@ -487,7 +518,7 @@ async function synthesizeAnswer(question, { askBlocks = [], catalogEntries = [],
  * - ASK_USE_LLM_SYNTHESIS=true → try qwen3 synthesis; on any failure, deterministic fallback
  * - otherwise → deterministic buildCombinedAnswer
  */
-async function buildCombinedAnswerLLM(question, { askBlocks = [], catalogEntries = [], callModel, diag = {}, responseLanguage } = {}) {
+async function buildCombinedAnswerLLM(question, { askBlocks = [], catalogEntries = [], exactEvidence = [], callModel, diag = {}, responseLanguage } = {}) {
   const useLlm = /^(1|true|yes|on)$/i.test(String(process.env.ASK_USE_LLM_SYNTHESIS || ''));
   const requireLlm = /^(1|true|yes|on)$/i.test(String(process.env.ASK_REQUIRE_LLM_SYNTHESIS || ''));
   diag.enabled = useLlm;
@@ -495,16 +526,18 @@ async function buildCombinedAnswerLLM(question, { askBlocks = [], catalogEntries
   diag.model = process.env.ASK_SYNTHESIS_MODEL || 'qwen3:14b';
   diag.called = false; diag.success = false; diag.guardRejected = false;
   diag.fallbackUsed = false; diag.failedReason = '';
+  diag.exactBlocksUsed = (exactEvidence || []).length;
 
-  if (askBlocks.length === 0 && catalogEntries.length === 0) {
+  if (askBlocks.length === 0 && catalogEntries.length === 0 && (exactEvidence || []).length === 0) {
     diag.finalPath = 'no_answer';
     return { answered: false, answer: NOT_ENOUGH_INFO, sources: [], synthesized: false };
   }
   if (useLlm) {
-    const synthesized = await synthesizeAnswer(question, { askBlocks, catalogEntries, callModel, diag, responseLanguage });
+    const synthesized = await synthesizeAnswer(question, { askBlocks, catalogEntries, exactEvidence, callModel, diag, responseLanguage });
     if (synthesized) {
       diag.finalPath = 'qwen_synthesis';
       const sources = [
+        ...(exactEvidence || []).map((e) => e.url).filter(Boolean).map((u) => `ask-exact-context.json:${u}`),
         ...askBlocks.map(({ block }) => block.url).filter(Boolean).map((u) => `ask-context.json:${u}`),
         ...catalogEntries.map((e) => `catalog.json:${e.id || e.title}`),
       ];
@@ -528,7 +561,7 @@ async function buildCombinedAnswerLLM(question, { askBlocks = [], catalogEntries
     }
     diag.fallbackUsed = true; // fall through to deterministic on synthesis failure
   }
-  const det = buildCombinedAnswer(question, { askBlocks, catalogEntries });
+  const det = buildCombinedAnswer(question, { askBlocks, catalogEntries, exactEvidence });
   diag.finalPath = useLlm ? 'deterministic_fallback' : 'deterministic';
   return { ...det, synthesized: false };
 }

@@ -35,6 +35,7 @@ const { isDemoMode, stepLog, simpleStep, runWithTrace } = require('../utils/demo
 const { createTrace, getTrace, markTraceDone } = require('../services/traceBuffer.service');
 const { SOURCE_TYPES, detectSourceType, buildContactFactsAnswer } = require('../services/askRetrieval.service');
 const { retrieveAskContextBlocks, buildCombinedAnswerLLM, NOT_ENOUGH_INFO } = require('../services/askContext.service');
+const { buildExactEvidence, selectAskAnswerLink } = require('../services/askExactContext.service');
 const { retrieveCatalogEntries } = require('../services/catalogRetrieval.service');
 const { normalizeQuery } = require('../services/queryNormalization.service');
 const { semanticSearchAsk } = require('../services/semanticRetrieval.service');
@@ -716,12 +717,18 @@ const handleAskContextRetrieval = async (req, res, next) => {
       req._timing.phases[sem.enabled && !sem.fallbackUsed ? 'semanticRetrievalMs' : 'catalogRetrievalMs'] = _retrievalMs;
     }
 
+    // Optional exact-evidence layer: rank ALL exact page chunks by relevance to the query
+    // (generic — no hardcoded page ids), boosting the current page and penalizing menu/footer
+    // boilerplate. Missing/invalid/empty ask-exact-context.json → [] → behavior unchanged.
+    const _currentUrl = (req.siteContext && req.siteContext.url) || (req.body && req.body.siteContext && req.body.siteContext.url) || null;
+    const exactEvidence = buildExactEvidence({ message, currentUrl: _currentUrl });
+
     // LLM synthesis when ASK_USE_LLM_SYNTHESIS=true (sends only selected evidence to
     // qwen3:14b, answering in responseLanguage), else deterministic. Fallback automatic.
     const _synthDiag = {};
     req._synthDiag = _synthDiag; // exposed to withTiming for qwenSynthesisMs / answerValidationMs
     const result = await buildCombinedAnswerLLM(message, {
-      askBlocks, catalogEntries, diag: _synthDiag, responseLanguage: norm.responseLanguage,
+      askBlocks, catalogEntries, exactEvidence, diag: _synthDiag, responseLanguage: norm.responseLanguage,
     });
 
     if (req._askTrace) {
@@ -764,9 +771,14 @@ const handleAskContextRetrieval = async (req, res, next) => {
           contentSource: e.contentSource || null,
         })),
       };
+      t.retrieval.exactContext = {
+        loaded: exactEvidence.length > 0,
+        matches: exactEvidence.map((e) => ({ id: e.blockId || '', url: e.url || '', chunks: e.chunks.length, source: 'ask-exact-context.json' })),
+      };
       t.selectedEvidence = {
         askContextCount: askBlocks.length,
         catalogCount: catalogEntries.length,
+        exactContextCount: exactEvidence.length,
         totalCharsSentToModel: _synthDiag.totalCharsSentToModel || 0,
       };
       t.synthesis = {
@@ -787,6 +799,13 @@ const handleAskContextRetrieval = async (req, res, next) => {
     }
     if (result.answered) {
       req._finalRoute = sem.enabled && !sem.fallbackUsed ? 'semantic_retrieval' : 'ask_context+catalog';
+      // Useful-link URL derived from the SELECTED evidence (not stale page/nav state).
+      const askLink = selectAskAnswerLink({ message, exactEvidence, askBlocks, catalogEntries, currentUrl: _currentUrl });
+      if (askLink) {
+        const _ll = `selectedUrl=${askLink.url} selectedSource=${askLink.sourceFile}:${askLink.sourceType} reason=${askLink.reason}`;
+        if (isDemoMode()) stepLog('ASK_LINK', _ll);
+        else console.log(`[ASK_LINK] ${_ll}`);
+      }
       if (isDemoMode()) {
         const _routeLabel = sem.enabled && !sem.fallbackUsed ? 'semantic_retrieval' : 'ask_context+catalog';
         stepLog('Route', `${_routeLabel} retrievalMs=${_retrievalMs}`);
@@ -800,7 +819,10 @@ const handleAskContextRetrieval = async (req, res, next) => {
           (sem.topMatches[0] && sem.topMatches[0].sourceId) || '(none)';
         simpleStep('RETRIEVE', `source=ask-context+catalog route=${_routeLabel} retrievalMs=${_retrievalMs} top=${_top}`);
         simpleStep('GENERATE', `model=${result.synthesized ? _synthDiag.model : 'deterministic'} qwenMs=${_qwenMs} evidence=${askBlocks.length + catalogEntries.length}`);
-        stepLog('SynthesisDiag', `qwenCalled=${!!_synthDiag.called} success=${!!_synthDiag.success} semanticEnabled=${!!sem.enabled} evidence=${askBlocks.length + catalogEntries.length} lang=${norm.responseLanguage}`);
+        stepLog('SynthesisDiag', `qwenCalled=${!!_synthDiag.called} success=${!!_synthDiag.success} semanticEnabled=${!!sem.enabled} evidence=${askBlocks.length + catalogEntries.length} exact=${exactEvidence.length} lang=${norm.responseLanguage}`);
+        if (exactEvidence.length) {
+          stepLog('ExactEvidence', exactEvidence.map((e) => `${e.blockId || e.url}(${e.chunks.length})`).join(' | ').slice(0, 140));
+        }
         if (!result.synthesized && _synthDiag.enabled) {
           stepLog('DeterministicReason', _synthDiag.failedReason || (_synthDiag.guardRejected ? 'guard_rejected' : 'unknown'));
         }
@@ -816,7 +838,7 @@ const handleAskContextRetrieval = async (req, res, next) => {
         const _bneckName = { qwenSynthesis: _synthDiag.model || 'qwen3:14b', embedding: 'bge-m3', retrieval: 'retrieval' };
         simpleStep('DONE', `success totalMs=${_totalMs} bottleneck=${_bneckName[_bneck[0]] || _bneck[0]}`);
       }
-      return res.json({ success: true, assistantMessage: result.answer });
+      return res.json({ success: true, assistantMessage: result.answer, ...(askLink ? { askLink } : {}) });
     }
     if (isDemoMode()) stepLog('AskContext', 'no ask-context/catalog match — fall through to ask pipeline');
   } catch { /* fall through to the rest of the ask pipeline */ }

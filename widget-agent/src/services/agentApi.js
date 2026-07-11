@@ -398,6 +398,21 @@ const detectAnswerLang = (text = '') =>
     ? 'fr'
     : 'en';
 
+// Backend-authoritative ASK link: the server already ranked the selected evidence and
+// chose the useful-link URL. Trust it (validated) instead of re-guessing from source order.
+const buildLinkHelperFromBackend = (askLink, lang = 'en') => {
+  if (!askLink || !askLink.url || !isAllowedNavUrl(askLink.url)) return null;
+  const isDoc = isDocUrl(askLink.url);
+  return {
+    label: linkHelperLabel(askLink.url, isDoc, lang),
+    url: askLink.url,
+    action: isDoc ? 'open_document' : 'navigate',
+    sourceType: askLink.sourceType || 'ask',
+    reason: askLink.reason || '',
+    lang,
+  };
+};
+
 // Pick the single best public page/document to offer. Returns null when only
 // catalog entries (no user-facing URL) or root/homepage URLs exist.
 const buildLinkHelper = (sources = [], lang = 'en') => {
@@ -689,7 +704,10 @@ export function normalizeAgentResponse(response) {
   const sources = parsedSources.length ? parsedSources : normalizeStructuredSources(structured);
 
   // One user-facing navigation helper replaces the raw source chips (kept internally).
-  const linkHelper = buildLinkHelper(sources, detectAnswerLang(text));
+  // Prefer the backend-authoritative ASK link (derived from the ranked selected evidence)
+  // over guessing from source-line order; fall back to source parsing when absent.
+  const backendLink = buildLinkHelperFromBackend(response?.askLink || data?.askLink, detectAnswerLang(text));
+  const linkHelper = backendLink || buildLinkHelper(sources, detectAnswerLang(text));
 
   return {
     text,
