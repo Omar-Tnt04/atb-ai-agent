@@ -72,4 +72,39 @@ assert.equal(
   'http://localhost:5000/resources/view/abcdefabcdefabcdefabcdefabcdefab',
 );
 
+// ── A valid backend askLink is authoritative: source-line parsing must NOT replace it ──
+// The backend chose the link from the SAME evidence pack that produced the answer; the
+// widget's "Source:" line fallback exists only for responses that carry no askLink.
+{
+  const withAskLink = normalizeAgentResponse({
+    success: true,
+    assistantMessage:
+      "ATB Connect est la banque à distance de l'ATB.\n" +
+      'Source: ask-exact-context.json — https://atb.tn/produits/credit-start-presentation.php',
+    askLink: {
+      url: 'https://atb.tn/services-banque-atbconnect',
+      sourceType: 'exact_chunk',
+      reason: 'top_exact_chunk',
+      derivedFrom: 'selected_evidence',
+    },
+  });
+  assert.equal(withAskLink.linkHelper.url, 'https://atb.tn/services-banque-atbconnect');
+  assert.equal(withAskLink.linkHelper.sourceType, 'exact_chunk');
+
+  // No backend askLink → the source-line fallback still works (non-regression).
+  const withoutAskLink = normalizeAgentResponse({
+    success: true,
+    assistantMessage: 'Réponse.\nSource: ask-context.json — https://atb.tn/nos-agences-en-tunisie',
+  });
+  assert.equal(withoutAskLink.linkHelper.url, 'https://atb.tn/nos-agences-en-tunisie');
+
+  // An invalid/off-domain backend askLink is rejected, and the fallback takes over.
+  const badAskLink = normalizeAgentResponse({
+    success: true,
+    assistantMessage: 'Réponse.\nSource: ask-context.json — https://atb.tn/contact',
+    askLink: { url: 'https://evil.example/atb', sourceType: 'exact_chunk' },
+  });
+  assert.equal(badAskLink.linkHelper.url, 'https://atb.tn/contact');
+}
+
 console.log('widget agentApi tests passed');

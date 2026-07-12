@@ -11,8 +11,17 @@
  * Never required: missing/invalid/empty file → selectExactEvidence returns [] and Ask
  * mode behaves as before (ask-context.json + catalog.json). Read-only.
  *
- * Ranking is generic (rankEvidenceCandidates): token/phrase overlap, url/title match,
- * current-page boost, per-kind source weighting tuned by broad INTENT, minus a
+ * SINGLE SOURCE OF TRUTH (buildAskEvidencePack):
+ *   candidates (exact chunks + ask-context blocks + catalog entries)
+ *     → ONE ranking pass (rankEvidenceCandidates)
+ *     → ONE selected evidence pack (selectEvidencePack)  ← the only thing synthesis sees
+ *     → the useful link (selectAskAnswerLink) chosen FROM THAT PACK, never re-ranked from
+ *       the raw candidate universe. Answer grounding and link selection cannot diverge.
+ *
+ * Ranking is generic (rankEvidenceCandidates): rarity-weighted (idf) token overlap so
+ * brand/common tokens ("atb", "banque", "service") barely count, an IDENTITY score (title/
+ * id/URL slug/usefulForQuestionsAbout — what a page IS, vs what its nav merely mentions),
+ * phrase hits, current-page boost, per-kind source weighting tuned by broad INTENT, minus a
  * boilerplate penalty on exact chunks. Intent decides page-text vs document evidence:
  *   document_or_form_request → prefer document/form/catalog_resource
  *   page_information_request → prefer relevant exact_chunk + key_point
@@ -108,14 +117,66 @@ function boilerplateFraction(text) {
 }
 
 // ── relevance helpers ───────────────────────────────────────────────────────────
-function relevance(qTokens, text) {
-  if (!qTokens.length) return 0;
-  const toks = tokenize(text);
-  if (!toks.length) return 0;
-  const matched = new Set();
-  for (const qt of qTokens) if (toks.some((t) => stemMatch(qt, t))) matched.add(qt);
-  return matched.size / qTokens.length;
+// Query tokens are weighted by RARITY (idf) over the candidate set, so brand/common
+// tokens ("atb", "banque", "service", "client") — which appear in nearly every page,
+// menu and footer — carry almost no discriminative weight, while a rare token
+// ("connect", "mobilink", "renov") dominates. Fully generic: no entity is named here.
+function idfWeights(qTokens, docTokenSets) {
+  const N = docTokenSets.length || 1;
+  const w = new Map();
+  for (const qt of qTokens) {
+    let df = 0;
+    for (const toks of docTokenSets) if (toks.some((t) => stemMatch(qt, t))) df++;
+    w.set(qt, Math.log(1 + N / (1 + df)));
+  }
+  return w;
 }
+
+/** Rarity-weighted share of the query covered by `toks`. 0..1. */
+function weightedRelevance(qTokens, weights, toks) {
+  let total = 0;
+  let got = 0;
+  for (const qt of qTokens) {
+    const wt = weights.get(qt) || 0;
+    total += wt;
+    if (toks.some((t) => stemMatch(qt, t))) got += wt;
+  }
+  return total > 0 ? got / total : 0;
+}
+
+// Accent-folded, separator-free form: "services-banque-atbconnect" → "servicesbanqueatbconnect".
+// Lets a query token match inside a slug/id that no tokenizer would ever split ("atbconnect").
+const compact = (s) => foldLower(s).replace(/[^a-z0-9]+/g, '');
+
+// The IDENTITY of a candidate: what it *is* (title, id, URL slug, curated hints) as
+// opposed to what its page text merely *mentions*. A global nav menu on the Crédit Start
+// page mentions "ATB Connect"; only the ATB Connect page is *identified* by it.
+function identityText(c) {
+  const useful = (c.metadata && c.metadata.usefulForQuestionsAbout) || [];
+  return [c.title, c.id, c.url, Array.isArray(useful) ? useful.join(' ') : useful].filter(Boolean).join(' ');
+}
+
+/** Rarity-weighted share of the query present in the candidate's identity fields. 0..1. */
+function identityRelevance(qTokens, weights, idText) {
+  const toks = tokenize(idText);
+  const flat = compact(idText);
+  let total = 0;
+  let got = 0;
+  for (const qt of qTokens) {
+    const wt = weights.get(qt) || 0;
+    total += wt;
+    if (toks.some((t) => stemMatch(qt, t)) || (qt.length >= 4 && flat.includes(qt))) got += wt;
+  }
+  return total > 0 ? got / total : 0;
+}
+
+/** 1 when an adjacent query phrase appears in the identity ("atb connect" → …atbconnect). */
+function identityPhraseHit(qTokens, idText) {
+  const flat = compact(idText);
+  for (let i = 0; i < qTokens.length - 1; i++) if (flat.includes(qTokens[i] + qTokens[i + 1])) return 1;
+  return 0;
+}
+
 function phraseHits(query, text) {
   const words = foldLower(query).split(/\s+/).filter((w) => w.length >= 3);
   const f = foldLower(text);
@@ -149,23 +210,38 @@ function rankEvidenceCandidates(query, candidates, { intent, currentUrl } = {}) 
   const it = intent || detectAskIntent(query);
   const qTokens = tokenize(query);
   const cu = currentUrl ? canonUrl(currentUrl) : null;
-  const list = (candidates || []).map((c) => {
+  const list = (candidates || []);
+
+  // Per-candidate searchable surfaces, computed once (identity + full text).
+  const prepared = list.map((c) => {
+    const idText = identityText(c);
     const useful = (c.metadata && c.metadata.usefulForQuestionsAbout) || [];
-    const matchText = [c.title, c.url, Array.isArray(useful) ? useful.join(' ') : '', c.text].filter(Boolean).join(' ');
-    const rel = relevance(qTokens, matchText);
-    const utRel = relevance(qTokens, `${c.title || ''} ${c.url || ''}`);
+    const matchText = [c.title, c.url, Array.isArray(useful) ? useful.join(' ') : useful, c.text].filter(Boolean).join(' ');
+    return { c, idText, textToks: tokenize(matchText) };
+  });
+  // idf over the candidate universe being ranked → generic common-token damping.
+  const weights = idfWeights(qTokens, prepared.map((p) => p.textToks));
+
+  const scored = prepared.map(({ c, idText, textToks }) => {
+    const rel = weightedRelevance(qTokens, weights, textToks);
+    const idRel = identityRelevance(qTokens, weights, idText);
+    const idPhrase = identityPhraseHit(qTokens, idText);
     const ph = phraseHits(query, c.text || '');
     const boiler = c.evidenceKind === 'exact_chunk' ? boilerplateFraction(c.text) : 0;
     const currentMatch = !!(cu && c.url && canonUrl(c.url) === cu);
     const iw = intentWeight(c.evidenceKind, it);
-    const score = 2.0 * rel + 0.2 * ph + 0.4 * utRel + iw + (currentMatch ? 0.6 : 0) - (c.evidenceKind === 'exact_chunk' ? 1.5 * boiler : 0);
+    // Identity outweighs mere text mention: a page that IS the subject beats a page that
+    // only links to it from its nav menu (the Crédit Start vs ATB Connect failure).
+    const score = 1.2 * rel + 1.6 * idRel + 0.8 * idPhrase + 0.2 * ph + iw
+      + (currentMatch ? 0.6 : 0)
+      - (c.evidenceKind === 'exact_chunk' ? 1.5 * boiler : 0);
     const reasons = [
-      `rel=${rel.toFixed(2)}`, `iw=${iw.toFixed(2)}`,
+      `rel=${rel.toFixed(2)}`, `id=${idRel.toFixed(2)}`, idPhrase ? 'idPhrase' : null, `iw=${iw.toFixed(2)}`,
       ph ? `phrase=${ph}` : null, currentMatch ? 'currentPage' : null, boiler > 0.3 ? `boiler=${boiler.toFixed(2)}` : null,
     ].filter(Boolean);
-    return { ...c, relevance: rel, currentMatch, boiler, score, reasons };
+    return { ...c, relevance: rel, identityRelevance: idRel, currentMatch, boiler, score, reasons };
   });
-  return list.sort((a, b) => b.score - a.score);
+  return scored.sort((a, b) => b.score - a.score);
 }
 
 // ── candidate builders (one per source) ─────────────────────────────────────────
@@ -212,36 +288,47 @@ function buildCatalogCandidates(catalogEntries) {
   }));
 }
 
+// ── SINGLE SOURCE OF TRUTH: one ranked list → one selected evidence pack ────────
 /**
- * Select exact evidence for the query by ranking ALL exact chunks (no id gating).
- * Keeps only query-relevant (or current-page) chunks above a floor, grouped per block.
- * @returns [{ blockId, url, title, chunks: string[] }]
+ * Select the FINAL evidence pack from ONE ranked unified candidate list.
+ * Exact chunks are gated (relevance/floor/per-block caps); ask-context blocks and catalog
+ * entries were already selected by their own retrievers and are therefore always part of
+ * the pack (synthesis receives them whole) — they just keep their rank here.
+ * @returns selectedEvidence: [{ sourceFile, evidenceKind, id, url, title, text, score, reasons }]
+ *          in rank order — the ONLY list the answer AND the link may come from.
  */
-function selectExactEvidence(exactContext, { message = '', currentUrl = null } = {}) {
-  if (!exactContext || !Array.isArray(exactContext.exactBlocks) || exactContext.exactBlocks.length === 0) return [];
-  const intent = detectAskIntent(message);
-  const ranked = rankEvidenceCandidates(message, buildExactCandidates(exactContext), { intent, currentUrl });
+function selectEvidencePack(ranked, intent) {
   const FLOOR = intent.isDocument ? 2.0 : 0.6; // doc intent → exact rarely clears the bar
   const maxBlocks = intent.isComparison ? 5 : 3;
   const perBlock = 3;
-  const byBlock = new Map();
+  const chunkCount = new Map();
+  const out = [];
   for (const c of ranked) {
+    if (c.evidenceKind !== 'exact_chunk') { out.push(c); continue; }
     if (!(c.relevance > 0 || c.currentMatch)) continue; // must actually relate to the query
     if (c.score < FLOOR) continue;
     const key = c.id || canonUrl(c.url);
-    if (!byBlock.has(key)) {
-      if (byBlock.size >= maxBlocks) continue;
-      byBlock.set(key, { blockId: c.id || '', url: c.url || '', title: c.title || '', chunks: [] });
+    if (!chunkCount.has(key)) {
+      if (chunkCount.size >= maxBlocks) continue;
+      chunkCount.set(key, 0);
     }
-    const g = byBlock.get(key);
-    if (g.chunks.length < perBlock) g.chunks.push(c.text);
+    if (chunkCount.get(key) >= perBlock) continue;
+    chunkCount.set(key, chunkCount.get(key) + 1);
+    out.push(c);
   }
-  return [...byBlock.values()].filter((g) => g.chunks.length);
+  return out;
 }
 
-/** Production entry: load + select. Returns [] on any absence (silent fallback). */
-function buildExactEvidence({ domain = targetDomain(), message = '', currentUrl = null } = {}) {
-  return selectExactEvidence(loadAskExactContext(domain), { message, currentUrl });
+/** Group the pack's exact chunks into the per-block shape synthesis consumes. */
+function groupExactEvidence(selectedEvidence) {
+  const byBlock = new Map();
+  for (const c of selectedEvidence) {
+    if (c.evidenceKind !== 'exact_chunk') continue;
+    const key = c.id || canonUrl(c.url);
+    if (!byBlock.has(key)) byBlock.set(key, { blockId: c.id || '', url: c.url || '', title: c.title || '', chunks: [] });
+    byBlock.get(key).chunks.push(c.text);
+  }
+  return [...byBlock.values()].filter((g) => g.chunks.length);
 }
 
 const _isAtbPageUrl = (u) => {
@@ -250,46 +337,91 @@ const _isAtbPageUrl = (u) => {
 };
 
 /**
- * Pick the ONE useful-link URL to show under an ASK answer, derived from the SELECTED
- * evidence (never from stale current-page state or a previous action). Ranks the same
- * unified candidates the answer used and applies intent-based source priority:
- *   document_or_form_request → top document/form/catalog URL
- *   otherwise               → top exact_chunk URL, then rich_context/key_point, then doc/catalog
- * currentUrl is only a last resort (no evidence URL at all). The current-page boost still
- * applies inside ranking, so a currentUrl that IS a selected evidence URL can win normally.
- * @returns { url, sourceFile, sourceType, id, title, reason } or null.
+ * Pick the ONE useful-link URL shown under an ASK answer — STRICTLY from the already
+ * selected evidence pack. It does NOT re-rank the raw candidate universe: a candidate the
+ * answer never saw can never supply the link (that divergence was the Crédit Start bug).
+ *   document_or_form_request → top selected document/form/catalog URL
+ *   comparison_request       → top selected page, or none when no page clearly dominates
+ *   otherwise                → top selected exact_chunk, then rich_context/key_point, then doc/catalog
+ * currentUrl is a last resort only (no selected evidence carries a valid ATB URL).
+ * @returns { url, sourceFile, sourceType, id, title, score, reason, derivedFrom } | null
  */
-function selectAskAnswerLink({ message = '', exactEvidence = [], askBlocks = [], catalogEntries = [], currentUrl = null } = {}) {
-  const intent = detectAskIntent(message);
-  const cands = [];
-  for (const e of exactEvidence || []) {
-    if (e && e.url) cands.push({ evidenceKind: 'exact_chunk', sourceFile: 'ask-exact-context.json', id: e.blockId || '', url: e.url, title: e.title || '', text: (e.chunks || []).join(' '), metadata: {} });
-  }
-  cands.push(...buildAskContextCandidates(askBlocks).filter((c) => c.url));
-  cands.push(...buildCatalogCandidates(catalogEntries).filter((c) => c.url));
-
-  const ranked = rankEvidenceCandidates(message, cands, { intent, currentUrl }).filter((c) => _isAtbPageUrl(c.url));
-  const firstOf = (kinds) => ranked.find((c) => kinds.includes(c.evidenceKind));
+function selectAskAnswerLink({ message = '', selectedEvidence = [], intent = null, currentUrl = null } = {}) {
+  const it = intent || detectAskIntent(message);
+  const pool = (selectedEvidence || []).filter((c) => c.url && _isAtbPageUrl(c.url)); // pack order = rank order
+  const firstOf = (kinds) => pool.find((c) => kinds.includes(c.evidenceKind));
 
   let chosen = null;
   let reason = '';
-  if (intent.isDocument) {
-    chosen = firstOf(['document', 'form', 'catalog_resource']) || ranked[0] || null;
+  if (it.isDocument) {
+    chosen = firstOf(['document', 'form', 'catalog_resource']) || pool[0] || null;
     reason = chosen ? `document_intent_${chosen.evidenceKind}` : 'none';
+  } else if (it.isComparison) {
+    // Comparison: only offer a link when ONE page clearly dominates the others.
+    const pages = pool.filter((c) => c.evidenceKind !== 'document' && c.evidenceKind !== 'form');
+    const top = pages[0];
+    const rival = pages.find((c) => top && canonUrl(c.url) !== canonUrl(top.url));
+    if (top && (!rival || top.score - rival.score >= 0.25)) { chosen = top; reason = 'comparison_dominant_page'; }
+    else return null; // no single page dominates → no single link
   } else {
     chosen = firstOf(['exact_chunk'])
       || firstOf(['rich_context', 'key_point'])
       || firstOf(['document', 'catalog_resource', 'form'])
-      || ranked[0] || null;
+      || pool[0] || null;
     reason = chosen ? `top_${chosen.evidenceKind}` : 'none';
   }
 
   if (!chosen) {
     // Last resort only: current page, and only if it is a real ATB page URL.
-    if (currentUrl && _isAtbPageUrl(currentUrl)) return { url: currentUrl, sourceFile: 'current-page', sourceType: 'current_page', id: '', title: '', reason: 'fallback_current_url' };
+    if (currentUrl && _isAtbPageUrl(currentUrl)) {
+      return { url: currentUrl, sourceFile: 'current-page', sourceType: 'current_page', id: '', title: '', score: 0, reason: 'fallback_current_url', derivedFrom: 'current_url' };
+    }
     return null;
   }
-  return { url: chosen.url, sourceFile: chosen.sourceFile || '', sourceType: chosen.evidenceKind, id: chosen.id || '', title: chosen.title || '', reason };
+  return {
+    url: chosen.url, sourceFile: chosen.sourceFile || '', sourceType: chosen.evidenceKind,
+    id: chosen.id || '', title: chosen.title || '', score: Number((chosen.score || 0).toFixed(3)),
+    reason, derivedFrom: 'selected_evidence',
+  };
+}
+
+/**
+ * PRODUCTION ENTRY — the single retrieval→selection→link flow for ASK.
+ * 1. one unified candidate list (exact chunks + ask-context blocks + catalog entries)
+ * 2. one ranking pass
+ * 3. one selected evidence pack (what synthesis is allowed to use)
+ * 4. the useful link, chosen from that same pack — never re-ranked independently
+ * @returns { selectedEvidence, exactEvidence, askLink, intent }
+ */
+function buildAskEvidencePack({
+  domain = targetDomain(), message = '', currentUrl = null,
+  askBlocks = [], catalogEntries = [], exactContext,
+} = {}) {
+  const intent = detectAskIntent(message);
+  const ctx = exactContext !== undefined ? exactContext : loadAskExactContext(domain);
+  const candidates = [
+    ...buildExactCandidates(ctx),
+    ...buildAskContextCandidates(askBlocks),
+    ...buildCatalogCandidates(catalogEntries),
+  ];
+  const ranked = rankEvidenceCandidates(message, candidates, { intent, currentUrl });
+  const selectedEvidence = selectEvidencePack(ranked, intent);
+  return {
+    selectedEvidence,
+    exactEvidence: groupExactEvidence(selectedEvidence),
+    askLink: selectAskAnswerLink({ message, selectedEvidence, intent, currentUrl }),
+    intent,
+  };
+}
+
+/** Exact-only view of the pack (kept for callers/tests that only need page chunks). */
+function selectExactEvidence(exactContext, { message = '', currentUrl = null } = {}) {
+  return buildAskEvidencePack({ exactContext, message, currentUrl }).exactEvidence;
+}
+
+/** Production exact-evidence entry: load + select. Returns [] on any absence. */
+function buildExactEvidence({ domain = targetDomain(), message = '', currentUrl = null } = {}) {
+  return buildAskEvidencePack({ domain, message, currentUrl }).exactEvidence;
 }
 
 module.exports = {
@@ -303,6 +435,9 @@ module.exports = {
   buildExactCandidates,
   buildAskContextCandidates,
   buildCatalogCandidates,
+  selectEvidencePack,
+  groupExactEvidence,
+  buildAskEvidencePack,
   selectExactEvidence,
   buildExactEvidence,
   selectAskAnswerLink,

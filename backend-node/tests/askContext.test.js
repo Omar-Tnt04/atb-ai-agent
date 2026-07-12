@@ -133,3 +133,49 @@ console.log('askContext: all assertions passed');
 
   console.log('askContext LLM synthesis: all assertions passed');
 })().catch((e) => { console.error(e); process.exit(1); });
+
+// ── Markdown emphasis: the RULES live in the synthesis prompt, and a bolded answer
+//    must survive the pipeline untouched (formatting is never post-processed away). ──
+(async () => {
+  process.env.ASK_USE_LLM_SYNTHESIS = 'true';
+  const { buildCombinedAnswerLLM } = require('../src/services/askContext.service');
+
+  const CONNECT = "ATB Connect est le service de banque en ligne de l'ATB pour gérer vos comptes à distance.";
+  const RENOV = "Crédit Renov : ATB RENOV couvre jusqu'à 80 % du montant, jusqu'à 200 000 DT, remboursable sur 20 ans.";
+
+  // 1. "C'est quoi ATB Connect ?" → answer opens with the bold entity + definition.
+  let seenSystem = '';
+  const connectModel = async (_pack, system) => {
+    seenSystem = system;
+    return JSON.stringify({ answer: "**ATB Connect** est le service de banque en ligne de l'ATB qui permet de gérer ses comptes et ses opérations à distance." });
+  };
+  const r1 = await buildCombinedAnswerLLM("C'est quoi ATB Connect ?", {
+    exactEvidence: [{ blockId: 'services-banque-atbconnect', url: 'https://atb.tn/services-banque-atbconnect', title: 'ATB Connect', chunks: [CONNECT] }],
+    callModel: connectModel, responseLanguage: 'fr',
+  });
+  assert.ok(r1.answered && r1.synthesized, 'bolded answer must be accepted by the guard');
+  assert.ok(/^\*\*ATB Connect\*\* est le service/.test(r1.answer), `answer must open with the bold entity, got: ${r1.answer.slice(0, 60)}`);
+
+  // The formatting contract is IN THE PROMPT (not post-processing).
+  for (const rule of ['**bold**', 'EMPHASIS RULES', 'no HTML', '**200 000 DT**', 'Do NOT overuse bold']) {
+    assert.ok(seenSystem.includes(rule), `synthesis system prompt must carry the rule: ${rule}`);
+  }
+  assert.ok(/gras/.test(seenSystem), 'French answers get the localized emphasis clause');
+
+  // 2. "Explique Crédit Renov" → entity + every key figure bolded, all still evidence-supported.
+  const r2 = await buildCombinedAnswerLLM('Explique Crédit Renov', {
+    exactEvidence: [{ blockId: 'credit-renov', url: 'https://atb.tn/produits/credit-Renov-presentation.php', title: 'Crédit Renov', chunks: [RENOV] }],
+    callModel: async () => JSON.stringify({
+      answer: "**Crédit Renov** est le crédit de l'ATB pour financer vos travaux.\n- **Quotité** : jusqu'à **80 %** du montant\n- **Montant maximal** : **200 000 DT**\n- **Durée** : jusqu'à **20 ans**",
+    }),
+    responseLanguage: 'fr',
+  });
+  assert.ok(r2.answered && r2.synthesized, 'bolded figures must not trip the anti-hallucination guard');
+  for (const bold of ['**Crédit Renov**', '**80 %**', '**200 000 DT**', '**20 ans**', '**Montant maximal**']) {
+    assert.ok(r2.answer.includes(bold), `answer must keep ${bold}`);
+  }
+  assert.ok(!/<\/?[a-z]/i.test(r2.answer.split('Source:')[0]), 'no HTML in the answer body');
+
+  delete process.env.ASK_USE_LLM_SYNTHESIS;
+  console.log('askContext markdown emphasis: all assertions passed');
+})().catch((e) => { console.error(e); process.exit(1); });

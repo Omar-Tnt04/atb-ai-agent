@@ -35,7 +35,7 @@ const { isDemoMode, stepLog, simpleStep, runWithTrace } = require('../utils/demo
 const { createTrace, getTrace, markTraceDone } = require('../services/traceBuffer.service');
 const { SOURCE_TYPES, detectSourceType, buildContactFactsAnswer } = require('../services/askRetrieval.service');
 const { retrieveAskContextBlocks, buildCombinedAnswerLLM, NOT_ENOUGH_INFO } = require('../services/askContext.service');
-const { buildExactEvidence, selectAskAnswerLink } = require('../services/askExactContext.service');
+const { buildAskEvidencePack } = require('../services/askExactContext.service');
 const { retrieveCatalogEntries } = require('../services/catalogRetrieval.service');
 const { normalizeQuery } = require('../services/queryNormalization.service');
 const { semanticSearchAsk } = require('../services/semanticRetrieval.service');
@@ -717,11 +717,18 @@ const handleAskContextRetrieval = async (req, res, next) => {
       req._timing.phases[sem.enabled && !sem.fallbackUsed ? 'semanticRetrievalMs' : 'catalogRetrievalMs'] = _retrievalMs;
     }
 
-    // Optional exact-evidence layer: rank ALL exact page chunks by relevance to the query
-    // (generic — no hardcoded page ids), boosting the current page and penalizing menu/footer
-    // boilerplate. Missing/invalid/empty ask-exact-context.json → [] → behavior unchanged.
+    // ONE unified evidence pack: exact page chunks + the retrieved ask-context blocks +
+    // catalog entries are ranked together once (generic — no hardcoded page ids), the pack
+    // is what synthesis may use, and the useful-link is chosen from that SAME pack. Missing/
+    // invalid/empty ask-exact-context.json → no exact evidence → behavior unchanged.
     const _currentUrl = (req.siteContext && req.siteContext.url) || (req.body && req.body.siteContext && req.body.siteContext.url) || null;
-    const exactEvidence = buildExactEvidence({ message, currentUrl: _currentUrl });
+    const pack = buildAskEvidencePack({ message, currentUrl: _currentUrl, askBlocks, catalogEntries });
+    const exactEvidence = pack.exactEvidence;
+    const askLink = pack.askLink;
+    const _evLog = pack.selectedEvidence.slice(0, 3)
+      .map((e) => `selected=${e.sourceFile}:${e.evidenceKind}:${e.id || e.title} url=${e.url || '-'} score=${e.score.toFixed(2)} reason=${e.reasons.join(',')}`)
+      .join(' || ');
+    if (_evLog) console.log(`[ASK_EVIDENCE] ${_evLog}`);
 
     // LLM synthesis when ASK_USE_LLM_SYNTHESIS=true (sends only selected evidence to
     // qwen3:14b, answering in responseLanguage), else deterministic. Fallback automatic.
@@ -780,7 +787,13 @@ const handleAskContextRetrieval = async (req, res, next) => {
         catalogCount: catalogEntries.length,
         exactContextCount: exactEvidence.length,
         totalCharsSentToModel: _synthDiag.totalCharsSentToModel || 0,
+        // The one pack the answer AND the link are derived from.
+        items: pack.selectedEvidence.slice(0, 8).map((e) => ({
+          sourceFile: e.sourceFile, evidenceKind: e.evidenceKind, id: e.id, url: e.url,
+          title: e.title, score: Number(e.score.toFixed(3)), reasons: e.reasons,
+        })),
       };
+      t.askLink = askLink || null;
       t.synthesis = {
         enabled: !!_synthDiag.enabled, required: !!_synthDiag.required,
         model: _synthDiag.model || (process.env.ASK_SYNTHESIS_MODEL || 'qwen3:14b'),
@@ -799,10 +812,9 @@ const handleAskContextRetrieval = async (req, res, next) => {
     }
     if (result.answered) {
       req._finalRoute = sem.enabled && !sem.fallbackUsed ? 'semantic_retrieval' : 'ask_context+catalog';
-      // Useful-link URL derived from the SELECTED evidence (not stale page/nav state).
-      const askLink = selectAskAnswerLink({ message, exactEvidence, askBlocks, catalogEntries, currentUrl: _currentUrl });
+      // askLink comes from the SAME selected evidence pack the answer was built from.
       if (askLink) {
-        const _ll = `selectedUrl=${askLink.url} selectedSource=${askLink.sourceFile}:${askLink.sourceType} reason=${askLink.reason}`;
+        const _ll = `selected=${askLink.sourceFile}:${askLink.sourceType}:${askLink.id || askLink.title} url=${askLink.url} score=${askLink.score} reason=${askLink.reason} derivedFrom=${askLink.derivedFrom}`;
         if (isDemoMode()) stepLog('ASK_LINK', _ll);
         else console.log(`[ASK_LINK] ${_ll}`);
       }

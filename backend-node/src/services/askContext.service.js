@@ -302,11 +302,20 @@ const SYNTHESIS_SYSTEM =
   'You answer a banking website user strictly from the EVIDENCE provided. ' +
   'Use ONLY facts present in the evidence — never add outside knowledge, never guess numbers, ' +
   'emails, phone numbers, rates or dates. If the evidence does not cover the question, say so briefly. ' +
-  // Formatting for a narrow chat widget (ChatGPT-style):
+  // Formatting for a narrow chat widget (ChatGPT-style). Markdown only — never HTML.
   'Format the answer for a narrow chat widget: one short intro sentence, then Markdown bullet ' +
   'points ("- ") whenever you list contact details, documents, cards, amounts, rates, conditions ' +
-  'or steps. Put the important label of each bullet in **bold**, e.g. "- **Email**: x@y.com". ' +
-  'Keep it compact — no long dense paragraphs. ' +
+  'or steps. Keep it compact — no long dense paragraphs. ' +
+  // Semantic emphasis rules (readability only — never change the facts):
+  'EMPHASIS RULES (Markdown **bold**, no HTML): ' +
+  '(a) When the question asks what something is, OPEN with the entity in bold followed by a short ' +
+  'definition, e.g. "**ATB Connect** est le service de banque en ligne de l\'ATB qui …". ' +
+  '(b) Bold product, service and feature names (e.g. **ATB Connect**, **Mobilink**, **ATB PAY**, **Crédit Renov**). ' +
+  '(c) Bold key figures: percentages, amounts, durations, dates and phone numbers ' +
+  '(e.g. **80 %**, **200 000 DT**, **20 ans**, **70 026 267**). ' +
+  '(d) Bold the label of each bullet / section, e.g. "- **Montant maximal** : 200 000 DT". ' +
+  '(e) Do NOT overuse bold: emphasize only what a user scans for (entities, figures, labels). ' +
+  'Never bold ordinary words or whole sentences. ' +
   'Do NOT put sources, URLs or citations in the answer body (they are shown separately). ' +
   'Do NOT copy internal context summaries or page headings such as "Complaints page", ' +
   '"Context summary" or similar — write a natural user-facing answer. ' +
@@ -321,16 +330,26 @@ function _languageClause(responseLanguage) {
   if (responseLanguage === 'fr') {
     return ' The user wrote in French — répond en français. Utilise un format clair et compact : ' +
       'une courte phrase d\'introduction puis des puces Markdown ("- ") pour les coordonnées, ' +
-      'documents, montants, taux, conditions ou étapes. Mets les libellés importants en **gras**. ' +
+      'documents, montants, taux, conditions ou étapes. ' +
+      'Mise en gras (Markdown, jamais de HTML) : commence une définition par le nom du service en ' +
+      'gras (ex. "**ATB Connect** est le service de banque en ligne…") ; mets en gras les noms de ' +
+      'produits/services/fonctionnalités (**Mobilink**, **Crédit Renov**), les chiffres clés ' +
+      '(**80 %**, **200 000 DT**, **20 ans**, **70 026 267**) et les libellés de puces ou de ' +
+      'sections (**Montant maximal**, **Durée**, **Conditions**). N\'abuse pas du gras : seulement ' +
+      'ce qu\'un utilisateur cherche du regard, jamais des mots ordinaires ni des phrases entières. ' +
       'Ne mets pas les sources dans le corps de la réponse. Ne copie pas les résumés internes ' +
       '(ex. "Complaints page..."). Utilise uniquement les preuves fournies.';
   }
   if (responseLanguage === 'en') {
     return ' The user wrote in English — answer in English. Use a clear compact format: a short ' +
       'intro sentence then Markdown bullets ("- ") for contact details, documents, amounts, rates, ' +
-      'conditions or steps, with **bold** labels. Keep sources out of the answer body.';
+      'conditions or steps. Open a definition with the entity in **bold** ("**ATB Connect** is the ' +
+      'online banking service…"), bold product/service/feature names, key figures (**80 %**, ' +
+      '**200 000 DT**, **20 ans**, **70 026 267**) and bullet/section labels. Do not overuse bold. ' +
+      'Keep sources out of the answer body.';
   }
-  return ' Answer in the same language as the user question, using the compact bulleted format.';
+  return ' Answer in the same language as the user question, using the compact bulleted format ' +
+    'with **bold** entity names, key figures and bullet labels (Markdown only, no HTML).';
 }
 
 // Compact evidence pack — the ONLY site/catalog data the model ever sees.
