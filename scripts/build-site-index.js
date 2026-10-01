@@ -24,6 +24,27 @@ const path = require('path');
 const { chromium } = require('playwright');
 const { cleanSiteIndex } = require('./lib/site-index-clean');
 
+function indexFromContext(context, options = {}) {
+  const { isCrawlable } = require('./build-site-context');
+  const { buildAskContext } = require('./build-ask-context');
+  const { ask } = buildAskContext(context, options); // Shared publication guards.
+  const domain = new URL(context.meta.targetUrl).hostname;
+  const pages = context.pages.filter(page => isCrawlable(page.url, domain)).map(page => ({
+    url: page.url, title: page.title, description: page.pagePurpose || page.metaDescription || '',
+    headings: page.headings, textPreview: page.cleanText.slice(0, 1500),
+    documentLinks: (page.documents || []).map(doc => ({ documentUrl: doc.url, filename: doc.fileName, linkText: doc.text })),
+    documentActions: (page.buttons || []).filter(button => /télécharger|telecharger|download|\bpdf\b/i.test(button.text))
+      .map(button => ({ linkText: button.text })),
+    forms: (page.forms || []).map(form => ({ ...form, fields: form.fields.map(field => field.name || field.label).filter(Boolean) })),
+  }));
+  return cleanSiteIndex({
+    meta: { targetUrl: context.meta.targetUrl, domain, generatedAt: context.meta.generatedAt,
+      status: ask.meta.status, generator: 'build-site-index:context', sourceFile: 'context.json' },
+    pages, failedUrls: context.failedUrls || [],
+    urlsDiscovered: pages.length + (context.failedUrls || []).length,
+  });
+}
+
 // ── Settings (kept as plain constants, not environment variables) ──────────────
 // No fixed page/discovery cap: crawl runs until the queue is empty and no
 // worker is active, or the user interrupts it (Ctrl+C).
@@ -66,6 +87,7 @@ const RISKY_PATH_WORDS = [
   'checkout', 'payment', 'paiement',
   'virement', 'transfer',
   'delete', 'supprimer',
+  'image-captcha-refresh', 'captcha', 'ajax', 'session', 'webform', 'quicktabs',
 ];
 
 // ── URL helpers ────────────────────────────────────────────────────────────────
@@ -335,7 +357,16 @@ function extractPageData(config) {
 async function renderPage(context, url, config, navTimeout) {
   const page = await context.newPage();
   try {
-    await page.goto(url, { waitUntil: 'commit', timeout: navTimeout });
+    const response = await page.goto(url, { waitUntil: 'commit', timeout: navTimeout });
+    if (response && response.status() >= 400) throw new Error(`HTTP ${response.status()}`);
+    // ATB streams its header before the page content. Never index a partial response.
+    let documentTimer;
+    try {
+      const error = await Promise.race([response.finished(), new Promise((_, reject) => {
+        documentTimer = setTimeout(() => reject(new Error('Timeout receiving complete HTML')), navTimeout);
+      })]);
+      if (error) throw error;
+    } finally { clearTimeout(documentTimer); }
     try {
       await page.waitForLoadState('domcontentloaded', { timeout: DOM_TIMEOUT });
     } catch {
@@ -388,6 +419,19 @@ async function main() {
   const domain = start.hostname;
   const startUrl = normalizeUrl(start.href);
 
+  const contextOption = process.argv.indexOf('--context');
+  if (contextOption !== -1) {
+    const source = JSON.parse(fs.readFileSync(process.argv[contextOption + 1], 'utf8'));
+    if (new URL(source.meta.targetUrl).hostname !== domain) throw new Error('Context domain does not match target URL');
+    const output = indexFromContext(source, { allowPartial: process.argv.includes('--allow-partial') });
+    const destination = path.join(process.cwd(), 'site-context', domain, 'site-index.json');
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    fs.writeFileSync(`${destination}.tmp`, JSON.stringify(output, null, 2));
+    fs.renameSync(`${destination}.tmp`, destination);
+    console.log(`Built ACT index from shared capture: ${output.pages.length} pages, ${output.uniqueDocuments.length} documents.`);
+    return;
+  }
+
   const config = {
     docExtensions: DOC_EXTENSIONS,
     downloadWords: DOWNLOAD_WORDS,
@@ -419,6 +463,9 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ userAgent: 'SiteIndexBot/1.0 (+Playwright)' });
+  // Media downloads compete with streamed HTML; retain CSS/scripts for DOM rendering.
+  await context.route('**/*', route => ['image', 'font', 'media'].includes(route.request().resourceType())
+    ? route.abort() : route.continue());
 
   const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -514,7 +561,9 @@ async function main() {
   console.log('output path            :', outPath);
 }
 
-main().catch((err) => {
+if (require.main === module) main().catch((err) => {
   console.error('Fatal error:', err);
   process.exit(1);
 });
+
+module.exports = { indexFromContext };

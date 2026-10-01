@@ -41,8 +41,11 @@
     "site:context": "node scripts/build-site-context.js",
     "site:context:atb": "node scripts/build-site-context.js --url https://atb.tn --out site-context/atb.tn/context.json",
     "site:context:validate": "node scripts/validate-site-context.js site-context/atb.tn/context.json",
+    "site:ask:atb": "node scripts/build-ask-context.js site-context/atb.tn/context.json site-context/atb.tn",
+    "site:index:from-context:atb": "node scripts/build-site-index.js https://atb.tn --context site-context/atb.tn/context.json",
     "test:site-context": "node scripts/tests/site-context.test.js",
-    "capture:export": "node scripts/export-playwright-capture.js"
+    "capture:export": "node scripts/export-playwright-capture.js",
+    "build:extension": "npm --prefix widget-agent run build:extension"
   },
   "repository": {
     "type": "git",

@@ -48,3 +48,9 @@ Object.values(LOADING_STATUS).forEach((status) => {
 });
 
 console.log('widget uiHelpers tests passed');
+
+for (const mode of ['ask', 'act']) {
+  assert.deepEqual(selectLoadingSequence({message: 'Download an official PDF form', mode}),
+    [LOADING_STATUS.searching, LOADING_STATUS.preparing],
+    'A keyword alone must not claim that a browser action has started');
+}

@@ -3,7 +3,6 @@ import atbLogo from '../assets/atb-logo.png';
 import {
   EMPTY_AGENT_CONTEXT,
   cancelAgentAction,
-  clearAllWidgetState,
   clearChatState,
   confirmAgentAction,
   deriveAgentContext,
@@ -231,7 +230,7 @@ function SendIcon() {
 const PENDING_JOB_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 function ChatWidget() {
-  // Restore any conversation stashed before the host page navigated (iframe reload resets React).
+  // Restore any conversation stashed before the host page navigated (widget reload resets React).
   const [restored] = useState(() => readChatState());
   // When a pendingBrowserJob exists in restored state, we NEVER blindly restore it — we verify
   // with the backend first. Until verification completes, start with clean defaults to avoid
@@ -268,9 +267,6 @@ function ChatWidget() {
   const launcherDragRef = useRef(null);
   const suppressLauncherClickRef = useRef(false);
   const text = UI_TEXT;
-  const isEmbeddedWidget =
-    typeof document !== 'undefined' &&
-    document.documentElement.classList.contains('widget-embedded-document');
 
   useEffect(() => {
     if (!transcriptRef.current) return;
@@ -293,39 +289,6 @@ function ChatWidget() {
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!isEmbeddedWidget || window.parent === window) {
-      return;
-    }
-
-    window.parent.postMessage(isOpen ? 'ATB_WIDGET_OPEN' : 'ATB_WIDGET_CLOSED', '*');
-  }, [isEmbeddedWidget, isOpen]);
-
-  useEffect(() => {
-    if (!isEmbeddedWidget) {
-      return;
-    }
-
-    const handleLayoutMessage = (event) => {
-      const message = event.data || {};
-
-      if (message.type !== 'ATB_WIDGET_LAYOUT') {
-        return;
-      }
-
-      const root = document.documentElement;
-      root.style.setProperty('--embed-launcher-left', `${message.launcherLeft}px`);
-      root.style.setProperty('--embed-launcher-top', `${message.launcherTop}px`);
-      root.style.setProperty('--embed-panel-left', `${message.panelLeft}px`);
-      root.style.setProperty('--embed-panel-top', `${message.panelTop}px`);
-      root.style.setProperty('--embed-panel-width', `${message.panelWidth}px`);
-      root.style.setProperty('--embed-panel-height', `${message.panelHeight}px`);
-    };
-
-    window.addEventListener('message', handleLayoutMessage);
-    return () => window.removeEventListener('message', handleLayoutMessage);
-  }, [isEmbeddedWidget]);
 
   const appendAssistantMessage = ({
     text,
@@ -458,14 +421,11 @@ function ChatWidget() {
       browserPollRef.current = null;
       setPendingBrowserJob(null);
       setIsTyping(false);
-      // Clear bridge state from atb.tn localStorage — job is done.
-      if (window.parent !== window) {
-        window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
-      }
+
     }
   };
 
-  // Persist the conversation so a host-page navigation (which reloads the iframe) doesn't wipe it.
+  // Persist the conversation so a host-page navigation (which reloads the widget) doesn't wipe it.
   // Force isOpen=true when a browser-use job is active so the widget always reopens after navigation.
   useEffect(() => {
     if (!hasOpened && messages.length === 0 && !pendingBrowserJob) {
@@ -475,18 +435,13 @@ function ChatWidget() {
     saveChatState({ isOpen: stateIsOpen, hasOpened, messages, conversationId, pendingBrowserJob });
   }, [isOpen, hasOpened, messages, conversationId, pendingBrowserJob]);
 
-  // Mount-time browser-use job handling. Three paths:
+  // Verify pending browser-use jobs before restoring them.
   //
   // A) localStorage has a pendingBrowserJob → verify with backend before restoring.
   //    - TTL expired (>10 min): clear storage silently, start fresh.
   //    - Backend says running: restore messages + state, resume polling.
   //    - Backend says done/failed/not_found: clear storage, start fresh (no stale messages shown).
   //
-  // B) localStorage had nothing BUT content.js bridge may have state → listen for
-  //    ATB_WIDGET_BRIDGE_RESTORE (fired when browser-use just navigated the host tab).
-  //    Bridge restore is trusted without backend re-check (it's an immediate-navigation path).
-  //
-  // C) Neither → widget starts clean.
   useEffect(() => {
     const job = restored?.pendingBrowserJob;
     console.log('[ATB_WIDGET_APP] mount: hasPendingJob =', Boolean(job?.jobId), job?.jobId ? '(jobId=' + job.jobId + ')' : '');
@@ -497,9 +452,7 @@ function ChatWidget() {
       setMessages([]);
       setPendingBrowserJob(null);
       setIsTyping(false);
-      if (window.parent !== window) {
-        window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
-      }
+
     };
 
     if (job?.jobId) {
@@ -536,9 +489,7 @@ function ChatWidget() {
             setIsTyping(false);
             appendAssistantMessage({ text: data?.assistantMessage || text.fallback, animate: true });
             clearChatState();
-            if (window.parent !== window) {
-              window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
-            }
+
           } else {
             discardStaleJob('job status = ' + status);
           }
@@ -549,63 +500,6 @@ function ChatWidget() {
       return () => { cancelled = true; };
     }
 
-    // Path B — no localStorage pending job. Listen for bridge restore from content.js.
-    console.log('[ATB_WIDGET_APP] no localStorage pending job — listening for bridge restore');
-    const onBridgeRestore = (event) => {
-      const msg = event.data || {};
-      if (msg.type !== 'ATB_WIDGET_BRIDGE_RESTORE' || !msg.state?.pendingBrowserJob?.jobId) return;
-      const bridgeJob = msg.state.pendingBrowserJob;
-      console.log('[ATB_WIDGET_APP] bridge restore received, jobId:', bridgeJob.jobId);
-      // Bridge restore means the host page just navigated — the agent is already running.
-      // Resume polling only. Do NOT call /start again; that spawns a duplicate agent.
-      if (browserPollRef.current === bridgeJob.jobId) {
-        console.log('[WIDGET] polling already active for job:', bridgeJob.jobId);
-        return;
-      }
-      console.log('[WIDGET] start ignored, job already running:', bridgeJob.jobId);
-      setHasOpened(true);
-      setIsOpen(true);
-      setIsTyping(true);
-      setLoadingSequence(BROWSER_AGENT_SEQUENCE);
-      setPendingBrowserJob(bridgeJob);
-      if (Array.isArray(msg.state.messages) && msg.state.messages.length > 0) {
-        setMessages(msg.state.messages);
-      }
-      pollBrowserJob(bridgeJob.jobId);
-    };
-    window.addEventListener('message', onBridgeRestore);
-    return () => window.removeEventListener('message', onBridgeRestore);
-    // Run once on mount only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Dev reset: content.js sends ATB_WIDGET_DEV_RESET when __atbWidgetReset() is called from
-  // the ATB page console. Clears all iframe-side widget localStorage keys.
-  useEffect(() => {
-    const onDevReset = (event) => {
-      const msg = event.data || {};
-      if (msg.type !== 'ATB_WIDGET_DEV_RESET') return;
-      clearAllWidgetState();
-      console.log('[ATB_WIDGET_APP] dev reset applied — reload page to start fresh');
-    };
-    window.addEventListener('message', onDevReset);
-    return () => window.removeEventListener('message', onDevReset);
-  }, []);
-
-  // Fresh-tab reset: content.js sends ATB_WIDGET_FORCE_FRESH when the tab was closed and
-  // reopened (not a same-tab navigation). Discard any pending job from a prior session.
-  useEffect(() => {
-    const onForceFresh = (event) => {
-      if ((event.data || {}).type !== 'ATB_WIDGET_FORCE_FRESH') return;
-      console.log('[WIDGET] force fresh — discarding pending job from prior session');
-      abandonRef.current = true;
-      clearChatState();
-      if (window.parent !== window) {
-        window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
-      }
-    };
-    window.addEventListener('message', onForceFresh);
-    return () => window.removeEventListener('message', onForceFresh);
   }, []);
 
   // Resume a navigation-based goal after the host page reloaded. If a fresh breadcrumb exists, the
@@ -635,10 +529,12 @@ function ChatWidget() {
           payload: {},
           pageSnapshot: snapshot,
           pageGoalState: { ...(resume.goalState || {}), navigated: true },
+          mode: 'act',
         });
         const actions = response.raw?.pagePlan?.actions;
         if (Array.isArray(actions) && actions.length) {
-          await dispatchPageActions(actions);
+          const execution = await dispatchPageActions(actions);
+          if (!execution.ok) throw new Error('Page action could not be completed');
         }
         if (!cancelled) appendNormalizedAssistantResponse(response);
       } catch {
@@ -772,9 +668,7 @@ function ChatWidget() {
     setPendingFieldAction(null);
     setLoadingSequence([]);
     clearAllWidgetState();
-    if (window.parent !== window) {
-      window.parent.postMessage({ type: 'ATB_WIDGET_CLEAR_BRIDGE' }, '*');
-    }
+
   };
 
   const handleContinueAction = async ({ appendUser = false } = {}) => {
@@ -948,7 +842,7 @@ function ChatWidget() {
       }
     }
 
-    setLoadingSequence(selectLoadingSequence({ message: trimmedMessage, hasFiles: false }));
+    setLoadingSequence(selectLoadingSequence({ message: trimmedMessage, hasFiles: false, mode: agentMode }));
     setIsTyping(true);
 
     // When we hand a browser-use job off to the polling loop, the poller owns the typing state — so
@@ -960,7 +854,7 @@ function ChatWidget() {
       // returns a safe plan → run the actions (scroll/highlight/open document) and WAIT for the host
       // page to confirm before rendering. Loops only while the backend asks to ('continue'); stops
       // on a finished plan, on a safe navigation (the page reloads and the goal resumes), or after
-      // MAX_STEPS. Returns null snapshot when not embedded → single normal/browser-use request.
+      // MAX_STEPS. Returns null snapshot when running in standalone preview → single normal/browser-use request.
       const MAX_STEPS = 4;
       let pageSnapshot = await requestPageSnapshot();
       let goalState = null;
@@ -971,7 +865,7 @@ function ChatWidget() {
       let siteContext = null;
       if (agentMode === 'ask') {
         const cached = getSiteContext();
-        if (cached) {
+        if (cached && cached.ctx?.url === window.location.href) {
           siteContext = cached.ctx;
         } else {
           siteContext = await requestSiteContext();
@@ -1010,14 +904,7 @@ function ChatWidget() {
           };
           // `messages` is the stale pre-render closure value; include userMessage manually.
           saveChatState(stateToSave);
-          // Also save via parent-page bridge (atb.tn localStorage via content.js).
-          // Reliable fallback in case the iframe's partitioned localStorage is empty after reload.
-          if (window.parent !== window) {
-            window.parent.postMessage({
-              type: 'ATB_WIDGET_SAVE_BRIDGE',
-              state: { pendingBrowserJob: newBrowserJob, isOpen: true, messages: stateToSave.messages },
-            }, '*');
-          }
+
           setPendingBrowserJob(newBrowserJob);
           handedOffToPoll = true;
           await triggerBrowserAgentJobStart(jobId);
@@ -1028,7 +915,8 @@ function ChatWidget() {
         const plan = response.raw?.pagePlan;
         const actions = plan?.actions;
         if (Array.isArray(actions) && actions.length) {
-          await dispatchPageActions(actions);
+          const execution = await dispatchPageActions(actions);
+          if (!execution.ok) throw new Error('Page action could not be completed');
         }
 
         // Safe navigation: the host page is about to reload. Save the goal so the widget resumes it
@@ -1131,107 +1019,30 @@ function ChatWidget() {
   };
 
   const handleLauncherPointerDown = (event) => {
-    if (!isEmbeddedWidget || event.button !== 0) {
-      return;
-    }
-
-    event.preventDefault();
+    if (event.button !== 0) return;
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    suppressLauncherClickRef.current = true;
-    launcherDragRef.current = {
-      pointerId: event.pointerId,
-      lastX: event.clientX,
-      lastY: event.clientY,
-      totalX: 0,
-      totalY: 0,
-      didDrag: false,
-    };
-
-    window.parent.postMessage(
-      {
-        type: 'ATB_WIDGET_DRAG_START',
-        clientX: event.clientX,
-        clientY: event.clientY,
-      },
-      '*',
-    );
+    launcherDragRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, didDrag: false };
   };
-
   const handleLauncherPointerMove = (event) => {
-    const dragState = launcherDragRef.current;
-
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    const dx = event.clientX - dragState.lastX;
-    const dy = event.clientY - dragState.lastY;
-
-    dragState.lastX = event.clientX;
-    dragState.lastY = event.clientY;
-    dragState.totalX += dx;
-    dragState.totalY += dy;
-
-    if (!dragState.didDrag && Math.hypot(dragState.totalX, dragState.totalY) > 4) {
-      dragState.didDrag = true;
-    }
-
-    if (!dragState.didDrag) {
-      return;
-    }
-
-    event.preventDefault();
-
-    if (isEmbeddedWidget) {
-      window.parent.postMessage(
-        {
-          type: 'ATB_WIDGET_DRAG_MOVE',
-          clientX: event.clientX,
-          clientY: event.clientY,
-          dx,
-          dy,
-        },
-        '*',
-      );
-      return;
-    }
-
-    window.parent.postMessage(
-      {
-        type: 'ATB_WIDGET_DRAG_MOVE',
-        clientX: event.clientX,
-        clientY: event.clientY,
-        dx,
-        dy,
-      },
-      '*',
-    );
+    const drag = launcherDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 4) drag.didDrag = true;
+    if (!drag.didDrag) return;
+    suppressLauncherClickRef.current = true;
+    const shell = event.currentTarget.closest('.chat-widget-shell');
+    const left = Math.max(8, Math.min(innerWidth - 60, event.clientX - 26));
+    const top = Math.max(8, Math.min(innerHeight - 60, event.clientY - 26));
+    shell.style.left = `clamp(8px, ${left}px, calc(100vw - 60px))`;
+    shell.style.top = `clamp(8px, ${top}px, calc(100dvh - 60px))`;
+    shell.style.right = 'auto';
+    shell.style.bottom = 'auto';
+    shell.style.setProperty('--panel-left', `clamp(8px, ${left - 288}px, calc(100vw - 348px))`);
+    shell.style.setProperty('--panel-top', `clamp(8px, ${top - 514}px, calc(100dvh - 508px))`);
   };
-
   const handleLauncherPointerUp = (event) => {
-    const dragState = launcherDragRef.current;
-
-    if (!dragState || dragState.pointerId !== event.pointerId) {
-      return;
-    }
-
-    if (isEmbeddedWidget) {
-      launcherDragRef.current = null;
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-      window.parent.postMessage({ type: 'ATB_WIDGET_DRAG_END' }, '*');
-      return;
-    }
-
     launcherDragRef.current = null;
     event.currentTarget.releasePointerCapture?.(event.pointerId);
-
-    if (dragState.didDrag) {
-      suppressLauncherClickRef.current = true;
-      window.parent.postMessage({ type: 'ATB_WIDGET_DRAG_END' }, '*');
-      window.setTimeout(() => {
-        suppressLauncherClickRef.current = false;
-      }, 0);
-    }
+    setTimeout(() => { suppressLauncherClickRef.current = false; }, 0);
   };
 
   const handleLauncherClick = () => {
@@ -1247,44 +1058,11 @@ function ChatWidget() {
     openWidget();
   };
 
-  useEffect(() => {
-    if (!isEmbeddedWidget) {
-      return;
-    }
-
-    const handleLauncherControlMessage = (event) => {
-      const message = event.data || {};
-
-      if (message.type === 'ATB_WIDGET_LAUNCHER_CLICK') {
-        launcherDragRef.current = null;
-        suppressLauncherClickRef.current = false;
-
-        if (isOpen) {
-          closeWidget();
-        } else {
-          openWidget();
-        }
-        return;
-      }
-
-      if (message.type === 'ATB_WIDGET_DRAG_FINISHED') {
-        launcherDragRef.current = null;
-        window.setTimeout(() => {
-          suppressLauncherClickRef.current = false;
-        }, 0);
-      }
-    };
-
-    window.addEventListener('message', handleLauncherControlMessage);
-    return () => window.removeEventListener('message', handleLauncherControlMessage);
-  }, [isEmbeddedWidget, isOpen]);
-
   return (
     <section
       className={[
         'chat-widget-shell',
         isOpen ? 'chat-widget-shell-open' : '',
-        isEmbeddedWidget ? 'chat-widget-shell-embedded' : '',
       ]
         .filter(Boolean)
         .join(' ')}

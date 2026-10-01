@@ -68,6 +68,7 @@ async function embed(texts) {
   // keep_alive keeps bge-m3 resident so it is not evicted between requests (cold reload ~8s).
   const keepAlive = process.env.OLLAMA_KEEP_ALIVE || '30m';
   const out = await _ollama('/api/embed', { model: EMBED_MODEL(), input, keep_alive: keepAlive }, timeoutMs);
+  if (out?.error) throw new Error(`embed: ${out.error}`);
   const embeddings = out && out.embeddings;
   if (!Array.isArray(embeddings) || embeddings.length !== input.length) {
     throw new Error('embed: unexpected response shape');
@@ -159,7 +160,12 @@ function _hashesMatch(a, b) {
 async function buildIndex(domain = targetDomain()) {
   const chunks = [...(_askContextChunks(domain)), ...(await _catalogChunks())];
   if (chunks.length === 0) throw new Error('no chunks to index');
-  const vectors = await embed(chunks.map((c) => c.text));
+  // A refreshed site can contain hundreds of chunks. Bound the model batch so
+  // rebuilding the index does not exhaust Ollama's context/memory budget.
+  const vectors = [];
+  for (let offset = 0; offset < chunks.length; offset += 16) {
+    vectors.push(...await embed(chunks.slice(offset, offset + 16).map(chunk => chunk.text)));
+  }
   const stored = chunks.map((c, i) => ({
     id: c.id, sourceType: c.sourceType, sourceId: c.sourceId, title: c.title,
     url: c.url, category: c.category, textPreview: c.text.slice(0, 200),

@@ -78,12 +78,16 @@ function adaptSiteIndex(raw) {
 
   for (const doc of documents) {
     const sourcePages = Array.isArray(doc.sourcePages) ? doc.sourcePages : [];
+    // New site download buttons often all say "Télécharger". Keep that literal
+    // label for browser highlighting, but rank each document by its filename.
+    const genericLabel = /^(?:télécharger|telecharger|download|pdf|ouvrir|open|voir|ici)$/i.test(String(doc.linkText || '').trim());
+    const title = genericLabel ? (doc.filename || doc.linkText || '') : (doc.linkText || doc.filename || '');
     resources.push({
       type: 'document',
       id: `doc_${_hash(doc.documentUrl)}`,
       url: doc.documentUrl || '',
       path: _pathOf(doc.documentUrl),
-      title: doc.linkText || doc.filename || '',
+      title,
       filename: doc.filename || '',
       fileType: _extOf(doc.filename || doc.documentUrl),
       description: '',

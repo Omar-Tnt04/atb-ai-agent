@@ -69,9 +69,10 @@ assert.strictEqual(retrieveBlocks('quantum chromodynamics lattice gauge', fakeCt
 // ── real ask-context.json (if present) loads and answers a known question ──────
 try {
   const real = require('../../site-context/atb.tn/ask-context.json');
-  const hits = retrieveBlocks('what are the ATB exchange rates for foreign currency?', real);
-  assert.ok(hits.length > 0, 'real ask-context should retrieve a block for an exchange-rate question');
-  const a = buildGroundedAnswer('ATB exchange rates', hits);
+  const hits = retrieveBlocks('crédit Sayara voiture', real);
+  assert.ok(hits.length > 0, 'refreshed ask-context should retrieve the captured Sayara product');
+  assert.ok(hits[0].block.url.endsWith('/particuliers/nos-credits/credit-sayara'), 'current product page should outrank archived promotions');
+  const a = buildGroundedAnswer('crédit Sayara voiture', hits);
   assert.ok(a && /Source: https?:\/\//.test(a), 'real answer should cite a source URL');
 } catch (e) {
   if (e.code !== 'MODULE_NOT_FOUND') throw e;

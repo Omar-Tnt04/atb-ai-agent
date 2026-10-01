@@ -26,6 +26,7 @@ const ASSET_EXTENSIONS = new Set([
   'json', 'xml', 'woff', 'woff2', 'ttf', 'eot', 'mp3', 'mp4', 'webm', 'avi', 'mov',
 ]);
 const UNSAFE_PATH_RE = /(?:^|\/)(?:login|logout|sign-?in|auth|admin|wp-admin|payment|paiement|checkout|transfer|virement|delete|supprimer|confirm)(?:\/|$)/i;
+const TECHNICAL_PATH_RE = /(?:^|\/)(?:image-captcha-refresh|captcha|ajax|session|webform|quicktabs)(?:\/|$)/i;
 
 function parseArgs(argv) {
   const args = {};
@@ -48,6 +49,7 @@ function parseArgs(argv) {
   return {
     target,
     out: path.resolve(process.cwd(), out),
+    resume: args.resume ? path.resolve(process.cwd(), args.resume) : null,
     maxPages: number('max-pages', process.env.SITE_CONTEXT_MAX_PAGES || 250, 1, 100000),
     maxDepth: number('max-depth', process.env.SITE_CONTEXT_MAX_DEPTH || 5, 0, 50),
     concurrency: number('concurrency', process.env.SITE_CONTEXT_CONCURRENCY || 3, 1, 12),
@@ -86,7 +88,7 @@ function isCrawlable(raw, targetHost) {
     if (ASSET_EXTENSIONS.has(extensionOf(url.href))) return false;
     let pathname = url.pathname;
     try { pathname = decodeURIComponent(pathname); } catch {}
-    return !UNSAFE_PATH_RE.test(pathname);
+    return !UNSAFE_PATH_RE.test(pathname) && !TECHNICAL_PATH_RE.test(pathname);
   } catch { return false; }
 }
 
@@ -559,7 +561,17 @@ async function enrichWithOllama(page, config) {
 async function renderPage(browserContext, entry, config) {
   const page = await browserContext.newPage();
   try {
-    await page.goto(entry.url, { waitUntil: 'domcontentloaded', timeout: config.timeout });
+    const response = await page.goto(entry.url, { waitUntil: 'commit', timeout: config.timeout });
+    if (response && response.status() >= 400) throw new Error(`HTTP ${response.status()}`);
+    let documentTimer;
+    try {
+      const error = await Promise.race([response.finished(), new Promise((_, reject) => {
+        documentTimer = setTimeout(() => reject(new Error('Timeout receiving complete HTML')), config.timeout);
+      })]);
+      if (error) throw error;
+    } finally { clearTimeout(documentTimer); }
+    // Slow third-party scripts must not discard an otherwise readable public page.
+    await page.waitForLoadState('domcontentloaded', { timeout: Math.min(12000, config.timeout) }).catch(() => {});
     if (config.settleMs) await page.waitForTimeout(config.settleMs);
     const initialTextLength = await page.evaluate(() => String(document.body?.innerText || '').trim().length).catch(() => 0);
     if (initialTextLength < 80) {
@@ -586,10 +598,35 @@ async function renderPage(browserContext, entry, config) {
 async function main() {
   const config = parseArgs(process.argv.slice(2));
   const startUrl = normalizeUrl(config.target.href);
-  const queue = [{ url: startUrl, depth: 0 }];
-  const seen = new Set([startUrl]);
-  const pages = [];
-  const failed = [];
+  const previous = config.resume ? JSON.parse(fs.readFileSync(config.resume, 'utf8')) : null;
+  if (previous && normalizedHost(new URL(previous.meta.targetUrl).hostname) !== normalizedHost(config.target.hostname)) {
+    throw new Error('Resume crawl domain does not match --url');
+  }
+  const pages = (previous?.pages || []).filter(page => page.contentQuality?.hasMainContent && isCrawlable(page.url, config.target.hostname));
+  const queue = [];
+  const seen = new Set(pages.map(page => normalizeUrl(page.url)));
+  const enqueue = (url, depth) => {
+    const normalized = normalizeUrl(url);
+    if (seen.has(normalized) || !isCrawlable(normalized, config.target.hostname)) return;
+    seen.add(normalized);
+    queue.push({ url: normalized, depth });
+  };
+  enqueue(startUrl, 0);
+  for (const failure of previous?.failedUrls || []) {
+    if (/^HTTP (404|410)$/.test(failure.error)) seen.add(normalizeUrl(failure.url));
+    else enqueue(failure.url, 0);
+  }
+  for (const page of previous?.pages || []) {
+    if (!page.contentQuality?.hasMainContent) enqueue(page.url, page.depth || 0);
+  }
+  for (const page of pages) {
+    if (page.depth < config.maxDepth) {
+      for (const link of page.links || []) {
+        try { enqueue(link.url, page.depth + 1); } catch {}
+      }
+    }
+  }
+  const failed = (previous?.failedUrls || []).filter(failure => /^HTTP (404|410)$/.test(failure.error));
   let active = 0;
   let attempted = 0;
   let pagesSkipped = 0;
@@ -601,6 +638,8 @@ async function main() {
 
   const browser = await chromium.launch({ headless: true });
   const browserContext = await browser.newContext({ userAgent: 'SiteContextBuilder/1.0 (+Playwright)' });
+  await browserContext.route('**/*', route => ['image', 'font', 'media'].includes(route.request().resourceType())
+    ? route.abort() : route.continue());
 
   async function worker() {
     while (!interrupted) {
@@ -668,6 +707,7 @@ async function main() {
   const output = {
     meta: {
       targetUrl: config.target.href,
+      status: interrupted || queue.length > 0 || failed.some(failure => !/^HTTP (404|410)$/.test(failure.error)) ? 'partial' : 'complete',
       generatedAt: new Date().toISOString(),
       pagesCrawled: pages.length,
       pagesWithMainContent: pages.filter((page) => page.contentQuality.hasMainContent).length,
@@ -688,6 +728,9 @@ async function main() {
     failedUrls: failed,
   };
 
+  if (!pages.length || !output.meta.pagesWithMainContent) {
+    throw new Error('No usable pages captured; existing context has been preserved');
+  }
   fs.mkdirSync(path.dirname(config.out), { recursive: true });
   const temp = `${config.out}.tmp`;
   fs.writeFileSync(temp, JSON.stringify(output, null, 2), 'utf8');

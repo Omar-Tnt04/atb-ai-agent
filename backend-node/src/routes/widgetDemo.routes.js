@@ -1,3 +1,4 @@
+const { extensionPagePlan } = require('../services/extensionPagePlan.service');
 const express = require('express');
 const path = require('path');
 
@@ -63,6 +64,12 @@ const {
 } = require('../services/siteIndex.service');
 
 const router = express.Router();
+const { greetingResponse } = require('../services/greeting.service');
+const { currentDestination } = require('../services/currentDestination.service');
+function handleGreeting(req, res, next) {
+  const answer = greetingResponse(req.body?.message);
+  return answer ? res.json({ success: true, assistantMessage: answer }) : next();
+}
 
 const DEMO_USER = {
   id: 'user_client_001',
@@ -425,6 +432,7 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
         const _docUrl = _preAction.type === 'navigate_then_download'
           ? (_preAction.documentUrl || _preAction.url)
           : _preAction.url;
+        if (req.body?.clientCapabilities?.contentScript === true) return res.json(extensionPagePlan(_preAction));
         const _cdpOk = await checkCdpReachable();
         if (!_cdpOk) {
           if (isDemoMode()) stepLog('Done', 'Chrome not connected — returning direct link');
@@ -491,6 +499,7 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
 
     if (nav.ok && nav.confident && top && (top.sourceType === 'page' || top.sourceType === 'document') && top.url) {
       const isDoc = top.sourceType === 'document';
+      if (req.body?.clientCapabilities?.contentScript === true) return res.json(extensionPagePlan({ type: isDoc ? 'download' : 'navigate', url: top.url, title: top.title }));
       const cdpOk = await checkCdpReachable();
       if (!cdpOk) {
         if (isDemoMode()) stepLog('Done', 'Chrome not connected — returning direct link');
@@ -551,6 +560,7 @@ const handleBrowserTaskOrDelegate = async (req, res, next) => {
 
   // CDP-disconnected guard: never fail silently. Return a deterministic message
   // with the direct URL so the user can act manually.
+  if (isBrowserAction && req.body?.clientCapabilities?.contentScript === true) return res.json(extensionPagePlan(action));
   if (isBrowserAction) {
     const cdpOk = await checkCdpReachable();
     if (!cdpOk) {
@@ -724,7 +734,7 @@ const handleAskContextRetrieval = async (req, res, next) => {
     const _currentUrl = (req.siteContext && req.siteContext.url) || (req.body && req.body.siteContext && req.body.siteContext.url) || null;
     const pack = buildAskEvidencePack({ message, currentUrl: _currentUrl, askBlocks, catalogEntries });
     const exactEvidence = pack.exactEvidence;
-    const askLink = pack.askLink;
+    const askLink = currentDestination(pack.askLink);
     const _evLog = pack.selectedEvidence.slice(0, 3)
       .map((e) => `selected=${e.sourceFile}:${e.evidenceKind}:${e.id || e.title} url=${e.url || '-'} score=${e.score.toFixed(2)} reason=${e.reasons.join(',')}`)
       .join(' || ');
@@ -1097,7 +1107,7 @@ const handleBrowserAgentJobStatus = (req, res) => {
   });
 };
 
-router.post('/chat', withTiming, logWidgetRequestEntered, withTrace, withConversationContext, withIntentPreclassify, withRequestContext, withAgentPlan, withRequestPreparation, withAskDebugTrace, handleBrowserTaskOrDelegate, handleAskContextRetrieval, handleAskEvidenceResolver, handleAskRetrieval, handleAskTerminalGuard, handleChatMessage);
+router.post('/chat', withTiming, logWidgetRequestEntered, withTrace, handleGreeting, withConversationContext, withIntentPreclassify, withRequestContext, withAgentPlan, withRequestPreparation, withAskDebugTrace, handleBrowserTaskOrDelegate, handleAskContextRetrieval, handleAskEvidenceResolver, handleAskRetrieval, handleAskTerminalGuard, handleChatMessage);
 router.post('/browser-agent/:jobId/start', handleBrowserAgentJobStart);
 router.get('/browser-agent/:jobId', handleBrowserAgentJobStatus);
 

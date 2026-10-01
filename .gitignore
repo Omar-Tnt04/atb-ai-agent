@@ -59,3 +59,8 @@ dist/
 build/
 coverage/
 .vite/
+
+# Loadable extension bundle (rebuilt from widget-agent sources).
+!widget-injector-extension/dist/
+!widget-injector-extension/dist/widget.js
+widget-injector-extension/_metadata/

@@ -1,9 +1,17 @@
 {
   "manifest_version": 3,
   "name": "ATB AI Widget Injector",
-  "version": "1.0.0",
-  "description": "Dev tool: injects the ATB AI Banking Agent widget into hosted pages. Requires widget-agent on port 5174 and backend-node on port 5000.",
-  "host_permissions": ["http://localhost:5000/*"],
+  "version": "2.0.0",
+  "description": "ATB assistant rendered locally in an isolated Shadow DOM, with remote backend API access.",
+  "host_permissions": [
+    "https://atb.tn/*",
+    "https://www.atb.tn/*",
+    "http://atb.tn/*",
+    "http://www.atb.tn/*",
+    "http://localhost:5000/*",
+    "http://127.0.0.1:5000/*",
+    "https://*.trycloudflare.com/*"
+  ],
   "content_scripts": [
     {
       "matches": [
@@ -12,9 +20,20 @@
         "http://atb.tn/*",
         "http://www.atb.tn/*"
       ],
-      "js": ["widget-config.js", "content.js"],
-      "world": "MAIN",
+      "js": [
+        "dist/widget.js"
+      ],
+      "world": "ISOLATED",
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'"
+  }
 }

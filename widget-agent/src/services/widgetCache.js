@@ -1,3 +1,4 @@
+import { widgetStorage } from './widgetRuntime.js';
 const MODE_KEY = 'atb_widget_mode';
 const CONTACT_FACTS_KEY = 'atb_widget_contact_facts';
 const DOCUMENT_INDEX_KEY = 'atb_widget_document_index';
@@ -15,8 +16,8 @@ const DEFAULT_CONTACT_FACTS = {
 
 function _lsGet(key) {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
-    const raw = window.localStorage.getItem(key);
+    if (typeof window === 'undefined' || !widgetStorage()) return null;
+    const raw = widgetStorage().getItem(key);
     return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
@@ -25,8 +26,8 @@ function _lsGet(key) {
 
 function _lsSet(key, value) {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.setItem(key, JSON.stringify(value));
+    if (typeof window === 'undefined' || !widgetStorage()) return;
+    widgetStorage().setItem(key, JSON.stringify(value));
   } catch {
     /* ignore quota/security errors */
   }
@@ -34,8 +35,8 @@ function _lsSet(key, value) {
 
 function _lsRemove(key) {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.removeItem(key);
+    if (typeof window === 'undefined' || !widgetStorage()) return;
+    widgetStorage().removeItem(key);
   } catch {
     /* ignore */
   }

@@ -659,12 +659,12 @@
               <h2 id="security-title">Built for confident digital banking.</h2>
               <p>
                 This local demo shows how a banking site can host the ATB widget while keeping the
-                widget isolated in its own iframe.
+                widget isolated in extension Shadow DOM on the live ATB site.
               </p>
               <ul class="trust-list">
                 <li><span class="check">&#10003;</span> Secure session design</li>
                 <li><span class="check">&#10003;</span> Transparent activity review</li>
-                <li><span class="check">&#10003;</span> Dedicated assistant iframe</li>
+                <li><span class="check">&#10003;</span> Packaged extension assistant</li>
               </ul>
             </div>
 
@@ -677,7 +677,7 @@
               <article class="trust-card">
                 <span>Privacy</span>
                 <h3>Separated widget surface</h3>
-                <p>The host page embeds only the loader script and does not copy widget code.</p>
+                <p>The live ATB site uses the packaged Chrome extension without changes to its source code.</p>
               </article>
               <article class="trust-card">
                 <span>Support</span>
@@ -706,10 +706,6 @@
       </footer>
     </div>
 
-    <script
-      src="http://localhost:5174/atb-widget-loader.js"
-      data-widget-url="http://localhost:5174"
-      data-api-url="http://localhost:5000"
-    ></script>
+    <p><a href="http://localhost:5174">Open the standalone assistant preview</a>. Use the packaged Chrome extension for the live ATB site.</p>
   </body>
 </html>

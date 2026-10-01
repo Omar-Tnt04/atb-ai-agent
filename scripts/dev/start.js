@@ -118,7 +118,6 @@ let shuttingDown = false;
 let readyBannerPrinted = false;
 let activeAiModel = null;
 let tunnelApiUrl = null;
-let tunnelWidgetUrl = null;
 
 {
   const SEP = "==================================================";
@@ -234,18 +233,16 @@ function startHostedTunnels() {
       if (!m || state.ready) return;
       state.ready = true;
       if (label === "api") tunnelApiUrl = m[0];
-      else tunnelWidgetUrl = m[0];
       if (!DEMO_CONSOLE || DEV_LAUNCHER_DEBUG) {
         console.log(`[DEV_LAUNCHER] ${label} tunnel ready: ${m[0]}`);
       }
-      if (tunnelApiUrl && tunnelWidgetUrl) {
+      if (tunnelApiUrl) {
         // Write .tunnel-urls.json so the backend can serve /dev/widget-config to the extension.
         const tunnelUrlsPath = path.join(rootDir, ".tunnel-urls.json");
-        fs.writeFileSync(tunnelUrlsPath, JSON.stringify({ widgetUrl: tunnelWidgetUrl, apiUrl: tunnelApiUrl }), "utf8");
+        fs.writeFileSync(tunnelUrlsPath, JSON.stringify({ apiUrl: tunnelApiUrl }), "utf8");
         // Also patch widget-config.js as a static fallback when the backend is unreachable.
         if (fs.existsSync(configPath)) {
           let raw = fs.readFileSync(configPath, "utf8");
-          raw = raw.replace(/(widgetUrl:\s*)'[^']*'/, `$1'${tunnelWidgetUrl}'`);
           raw = raw.replace(/(apiUrl:\s*)'[^']*'/, `$1'${tunnelApiUrl}'`);
           fs.writeFileSync(configPath, raw, "utf8");
         }
@@ -269,7 +266,6 @@ function startHostedTunnels() {
   }
 
   spawnTunnel("api", 5000);
-  spawnTunnel("widget", 5174);
 }
 
 async function printReadyBanner() {
@@ -288,8 +284,8 @@ async function printReadyBanner() {
     return;
   }
 
-  // Hosted-browser mode also waits for both tunnel URLs before printing the banner.
-  if (isHostedBrowser && (!tunnelApiUrl || !tunnelWidgetUrl)) {
+  // Hosted-browser mode waits for the backend tunnel before printing the banner.
+  if (isHostedBrowser && !tunnelApiUrl) {
     return;
   }
 
@@ -310,15 +306,14 @@ async function printReadyBanner() {
     console.log("");
     console.log("Public tunnels");
     console.log(row("API tunnel", tunnelApiUrl));
-    console.log(row("Widget tunnel", tunnelWidgetUrl));
     console.log("");
     console.log("Demo");
     console.log("  Open hosted demo:");
     console.log("  http://localhost:5000/dev/open-hosted-demo");
     console.log("");
     console.log("Notes");
-    console.log("  Use the Chrome window opened by the demo launcher.");
-    console.log("  Do not use a normal Chrome window for browser actions.");
+    console.log("  Build with npm run build:extension, then reload the unpacked extension.");
+    console.log("  Open https://atb.tn in Chrome. Extension ACT works in that tab without CDP.");
     console.log("");
     console.log(SEP);
     return;

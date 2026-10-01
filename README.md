@@ -146,43 +146,19 @@ This is useful for internship demos and prototypes.
 
 Customers should not need to install the extension in production.
 
-### 2. Production method: script tag
+### Packaged Chrome extension
 
-In production, the website owner adds the widget loader script to the website.
+Run `npm run build:extension`, then load `widget-injector-extension` with **Load unpacked** in `chrome://extensions` (Developer mode). Reload the extension and refresh existing ATB tabs after updating it.
 
-Example:
+The React frontend, styles, and logo are packaged in `dist/widget.js`. An isolated content script mounts the assistant in Shadow DOM on `atb.tn` and `www.atb.tn`. ATB's CSP is unchanged; no iframe, page script, remote frontend, or header modification is used. UI edits require rebuilding the extension.
 
-```html
-<script
-  src="https://widget.example.com/atb-widget-loader.js"
-  data-api-url="https://ai-agent-api.example.com"
-  data-widget-url="https://widget.example.com">
-</script>
-```
+The extension prefers a healthy local backend on port 5000, so local demos do not need a Cloudflare tunnel. For remote demos, `widget-config.js` contains a fallback origin and the service worker also reads the local launcher's `/dev/widget-config`. Reload the extension after changing backend or tunnel URLs. API requests use the worker's restricted host permissions and route allowlist. The current Node backend must be running to use ASK/ACT.
 
-Meaning:
+ACT reads the live tab DOM and executes validated page plans in the content script. Indexed navigation and document actions return extension plans without requiring CDP. Conversations and navigation state are stored per tab in extension session storage.
 
-- `src` points to the hosted widget loader script
-- `data-widget-url` points to the hosted widget frontend
-- `data-api-url` points to the hosted backend API
+`npm --prefix widget-agent run dev` provides a standalone UI preview. The old remote embed loader has been removed.
 
-The loader script in this repo is:
-
-```text
-widget-agent/public/atb-widget-loader.js
-```
-
-For local development:
-
-```html
-<script
-  src="http://localhost:5174/atb-widget-loader.js"
-  data-api-url="http://localhost:5000"
-  data-widget-url="http://localhost:5174">
-</script>
-```
-
-For a real HTTPS website, the widget and backend should also be hosted on HTTPS domains.
+Validation: `node scripts/tests/extension-flow.test.cjs` runs Chromium with the unpacked extension and a local mock API on port 5000. Set `ATB_LIVE_TEST=1` to additionally check rendering on the live ATB website. Stop the local API first so the test can bind that port.
 
 ## Local setup
 

@@ -59,6 +59,17 @@ function isTechnicalForm(fields) {
  * @param {{meta?: object, pages: Array, failedUrls?: Array, urlsDiscovered?: number}} raw
  * @returns {object} the final agent-ready index
  */
+function deduplicatePages(pages) {
+ const byUrl = new Map();
+ // Keep the richest observed record; never synthesize page content.
+ const score = p => String(p.textPreview || '').length + String(p.title || '').length + JSON.stringify(p.headings || []).length;
+ for (const page of pages) {
+  const previous = byUrl.get(page.url);
+  if (!previous || score(page) > score(previous)) byUrl.set(page.url, page);
+ }
+ return [...byUrl.values()];
+}
+
 function cleanSiteIndex(raw) {
   const documentsMap = new Map(); // key: documentUrl
   const actionsMap = new Map(); // key: normalized linkText
@@ -121,6 +132,7 @@ function cleanSiteIndex(raw) {
     }
   }
 
+  const uniquePages = deduplicatePages(pages);
   const uniqueDocuments = Array.from(documentsMap.values());
   const uniqueDocumentActions = Array.from(actionsMap.values());
   const uniqueForms = Array.from(formsMap.values());
@@ -143,7 +155,7 @@ function cleanSiteIndex(raw) {
       failedPages: failedUrls.length,
     },
     cleanStats: {
-      pagesCrawled: pages.length,
+      pagesCrawled: uniquePages.length,
       urlsDiscovered,
       documentOccurrencesFound,
       uniqueDocumentsFound: uniqueDocuments.length,
@@ -154,7 +166,7 @@ function cleanSiteIndex(raw) {
       uniqueBusinessFormsFound: uniqueBusinessForms.length,
       failedPages: failedUrls.length,
     },
-    pages,
+    pages: uniquePages,
     uniqueDocuments,
     uniqueDocumentActions,
     uniqueForms,
@@ -163,4 +175,4 @@ function cleanSiteIndex(raw) {
   };
 }
 
-module.exports = { cleanSiteIndex };
+module.exports = { cleanSiteIndex, deduplicatePages };

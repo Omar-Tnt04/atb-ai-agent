@@ -233,6 +233,16 @@ function main() {
     process.exit(1);
   }
 
+  // Validate the clean format directly, retaining the legacy enriched validator below.
+  if (Array.isArray(siteIndex.pages) && Array.isArray(siteIndex.uniqueDocuments)) {
+    const { validateCleanIndex } = require('./validate-clean-site-index');
+    const errors = validateCleanIndex(siteIndex);
+    console.log(`Clean index: ${siteIndex.pages.length} pages, ${siteIndex.uniqueDocuments.length} documents`);
+    errors.slice(0, 20).forEach(error => console.error(error));
+    console.log(errors.length ? `${errors.length} validation errors` : 'Clean index validation passed');
+    process.exit(errors.length ? 1 : 0);
+  }
+
   const origin    = siteIndex.meta?.origin || '';
   const resources = siteIndex.resources;
   const stats     = siteIndex.stats;

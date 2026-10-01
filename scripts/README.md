@@ -12,13 +12,23 @@ Builds the website context used by **ASK mode**.
 
 It collects structured public-site information and produces context data that helps the assistant answer questions about the target website, its pages, services, contact information, documents, and public content.
 
-Main output:
+Rendered crawl output (not read directly by ASK mode):
 
 ```text
-site-context/<domain>/ask-context.json
+site-context/<domain>/context.json
 ```
 
-This file is used by the backend semantic ASK pipeline.
+Convert the validated crawl into the backend runtime schemas:
+
+```powershell
+node scripts/build-ask-context.js site-context/atb.tn/context.json site-context/atb.tn
+```
+
+This creates `ask-context.json` and `ask-exact-context.json` from the same fresh
+rendered evidence. It preserves source URLs and capture timestamps, splits long
+pages into retrieval chunks, and refuses empty crawls or unresolved failed URLs.
+Stage and review crawl output before replacing runtime files. Restart the backend
+after replacing context so its in-memory retrieval caches use the new content.
 
 ---
 
@@ -35,6 +45,26 @@ site-context/<domain>/site-index.json
 ```
 
 This file is used by the backend semantic navigation pipeline.
+
+To generate ASK and ACT from one validated capture (recommended for refreshes):
+
+```powershell
+node scripts/build-site-context.js --url https://atb.tn --out site-context/atb.tn/context.json --max-pages 1000 --max-depth 10 --ollama off
+node scripts/validate-site-context.js site-context/atb.tn/context.json
+node scripts/build-ask-context.js site-context/atb.tn/context.json site-context/atb.tn
+node scripts/build-site-index.js https://atb.tn --context site-context/atb.tn/context.json
+node scripts/validate-site-index.js site-context/atb.tn/site-index.json
+```
+
+For interrupted captures with saved output or transient failures, repeat the first
+command with `--resume site-context/atb.tn/context.json --timeout 60000`.
+Resume retries failed/weak pages and discovers remaining links. Known HTTP 404/410
+links stay recorded as exclusions; other failures block runtime conversion.
+When a site outage prevents completing a reviewed capture, `--allow-partial` on
+both conversion commands publishes only captured evidence while preserving
+`meta.status: "partial"` and every failed URL. It never fills gaps with old content.
+The crawl skips technical CAPTCHA endpoints and media downloads, retains CSS and
+scripts, and waits for the full HTML response before extracting rendered evidence.
 
 ---
 

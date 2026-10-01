@@ -1,3 +1,4 @@
+import { widgetRuntime, widgetStorage, widgetFetch } from './widgetRuntime.js';
 const DEFAULT_AGENT_API_URL = 'http://localhost:5000/api/widget/chat';
 const AUTH_REQUIRED_MESSAGE = 'Login is required to use the ATB agent.';
 const WIDGET_DEMO_DISABLED_MESSAGE = 'Widget demo mode is disabled.';
@@ -52,6 +53,7 @@ const assertBackendEndpoint = (value) => {
 };
 
 const getChatEndpoint = () => {
+  if (widgetRuntime.apiUrl) return `${widgetRuntime.apiUrl}/api/widget/chat`;
   // 1. Build-time env var takes highest priority (set in .env for production builds).
   const envUrl = (import.meta.env || {}).VITE_AGENT_API_URL;
   if (envUrl) return assertBackendEndpoint(envUrl);
@@ -129,7 +131,7 @@ async function parseJson(response) {
 }
 
 async function postJson(url, body) {
-  const response = await fetch(url, {
+  const response = await widgetFetch(url, {
     method: 'POST',
     headers: jsonHeaders(),
     body: JSON.stringify(body),
@@ -437,10 +439,7 @@ const buildLinkHelper = (sources = [], lang = 'en') => {
 // Click behavior:
 //  - documents open in a new tab (project convention for PDFs)
 //  - PAGE links navigate the SAME tab. Never window.open / _blank for pages.
-// The widget lives in a cross-origin iframe on the ATB host page, so a direct
-// window.top.location navigation is usually sandbox-blocked (it throws). We therefore
-// ask the host content-script/loader — which is same-origin to the tab — to navigate,
-// and also attempt direct top navigation for standalone/non-sandboxed cases.
+// Navigation is validated by the content script on ATB pages.
 export const openHelpfulLink = (linkHelper) => {
   if (!linkHelper || !linkHelper.url || !isAllowedNavUrl(linkHelper.url)) return;
   const { url } = linkHelper;
@@ -450,16 +449,8 @@ export const openHelpfulLink = (linkHelper) => {
     return;
   }
 
-  // Page link → same tab only.
-  const embedded = typeof window !== 'undefined' && window.parent && window.parent !== window;
-  if (embedded) {
-    try {
-      window.parent.postMessage({ type: 'ATB_WIDGET_NAVIGATE_SAME_TAB', url }, '*');
-    } catch { /* bridge unavailable — fall through to direct nav */ }
-  }
-  try {
-    (window.top || window).location.href = url; // no-ops/throws if sandbox-blocked; bridge handles it
-  } catch { /* handled by the content-script bridge above */ }
+  if (widgetRuntime.page) widgetRuntime.page.navigate(url);
+  else window.location.assign(url);
 };
 
 // Split assistant text into { text (Source: lines removed), sources[] }.
@@ -800,117 +791,17 @@ export async function sendAgentMessage({
     mode,
     cacheContext,
     siteContext,
+    clientCapabilities: widgetRuntime.page ? { contentScript: true } : undefined,
   });
 
   return normalizeAgentResponse(data);
 }
 
-// Same-page control bridge (widget iframe ↔ host-page loader).
-// Ask the loader (which lives in the host page and can read its DOM) for a generic snapshot.
-// Resolves null when not embedded or when no loader answers in time → backend then uses its
-// browser-use fallback instead of same-page control.
-export function requestPageSnapshot({ timeoutMs = 800 } = {}) {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined' || window.parent === window) {
-      resolve(null);
-      return;
-    }
-
-    const requestId = `snap-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    let settled = false;
-
-    const onMessage = (event) => {
-      const msg = event.data || {};
-      if (msg.type === 'ATB_PAGE_SNAPSHOT' && msg.requestId === requestId) {
-        settled = true;
-        window.removeEventListener('message', onMessage);
-        resolve(msg.snapshot || null);
-      }
-    };
-
-    window.addEventListener('message', onMessage);
-    window.parent.postMessage({ type: 'ATB_PAGE_INSPECT_REQUEST', requestId }, '*');
-
-    window.setTimeout(() => {
-      if (!settled) {
-        window.removeEventListener('message', onMessage);
-        resolve(null);
-      }
-    }, timeoutMs);
-  });
-}
-
-// Ask the host-page loader for a full structured site-context object extracted from the
-// current DOM. Used by Ask mode to enrich answers with page-specific content.
-// Resolves null when not embedded, no loader responds, or on timeout.
-export function requestSiteContext({ timeoutMs = 1200 } = {}) {
-  return new Promise((resolve) => {
-    if (typeof window === 'undefined' || window.parent === window) {
-      resolve(null);
-      return;
-    }
-
-    const requestId = `ctx-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    let settled = false;
-
-    const onMessage = (event) => {
-      const msg = event.data || {};
-      if (msg.type === 'ATB_SITE_CONTEXT_RESPONSE' && msg.requestId === requestId) {
-        settled = true;
-        window.removeEventListener('message', onMessage);
-        resolve(msg.context || null);
-      }
-    };
-
-    window.addEventListener('message', onMessage);
-    window.parent.postMessage({ type: 'ATB_SITE_CONTEXT_REQUEST', requestId }, '*');
-
-    window.setTimeout(() => {
-      if (!settled) {
-        window.removeEventListener('message', onMessage);
-        resolve(null);
-      }
-    }, timeoutMs);
-  });
-}
-
-// Forward a backend-produced page action plan to the host-page loader for safe execution.
-// Resolves once the loader confirms it ran the actions (ATB_PAGE_ACTION_RESULT) or after a
-// timeout — so the widget can wait for the scroll/highlight to happen before showing its final
-// answer, and never blocks the UI if no loader answers.
-export function dispatchPageActions(actions, { timeoutMs = 1500 } = {}) {
-  return new Promise((resolve) => {
-    if (!Array.isArray(actions) || actions.length === 0) {
-      resolve({ ok: false, dispatched: false });
-      return;
-    }
-    if (typeof window === 'undefined' || window.parent === window) {
-      resolve({ ok: false, dispatched: false });
-      return;
-    }
-
-    const requestId = `act-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    let settled = false;
-
-    const onMessage = (event) => {
-      const msg = event.data || {};
-      if (msg.type === 'ATB_PAGE_ACTION_RESULT' && msg.requestId === requestId) {
-        settled = true;
-        window.removeEventListener('message', onMessage);
-        resolve({ ok: !!(msg.result && msg.result.ok), dispatched: true, result: msg.result || null });
-      }
-    };
-
-    window.addEventListener('message', onMessage);
-    window.parent.postMessage({ type: 'ATB_PAGE_ACTION', actions, requestId }, '*');
-
-    window.setTimeout(() => {
-      if (!settled) {
-        window.removeEventListener('message', onMessage);
-        resolve({ ok: false, dispatched: true, result: null, timedOut: true });
-      }
-    }, timeoutMs);
-  });
+// Direct calls stay inside the isolated content script; the ATB page cannot forge actions.
+export async function requestPageSnapshot() { return widgetRuntime.page?.snapshot() || null; }
+export async function requestSiteContext() { return widgetRuntime.page?.context() || null; }
+export async function dispatchPageActions(actions) {
+  return widgetRuntime.page?.actions(actions) || { ok: false, dispatched: false };
 }
 
 // Resume breadcrumb: when a safe navigation reloads the host page (and the widget with it), we
@@ -921,8 +812,8 @@ const PAGE_GOAL_RESUME_TTL_MS = 30_000;
 
 export function savePageGoalResume(data) {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.setItem(
+    if (typeof window === 'undefined' || !widgetStorage()) return;
+    widgetStorage().setItem(
       PAGE_GOAL_RESUME_KEY,
       JSON.stringify({ ...data, ts: Date.now() }),
     );
@@ -933,8 +824,8 @@ export function savePageGoalResume(data) {
 
 export function readPageGoalResume() {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
-    const raw = window.localStorage.getItem(PAGE_GOAL_RESUME_KEY);
+    if (typeof window === 'undefined' || !widgetStorage()) return null;
+    const raw = widgetStorage().getItem(PAGE_GOAL_RESUME_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
@@ -947,8 +838,8 @@ export function readPageGoalResume() {
 
 export function clearPageGoalResume() {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.removeItem(PAGE_GOAL_RESUME_KEY);
+    if (typeof window === 'undefined' || !widgetStorage()) return;
+    widgetStorage().removeItem(PAGE_GOAL_RESUME_KEY);
   } catch {
     /* ignore */
   }
@@ -962,7 +853,7 @@ export async function triggerBrowserAgentJobStart(jobId) {
     ? `${getBackendBaseUrl()}/api/widget/browser-agent`
     : `${getBackendBaseUrl()}/agent/browser-agent`;
   try {
-    await fetch(`${base}/${encodeURIComponent(jobId)}/start`, {
+    await widgetFetch(`${base}/${encodeURIComponent(jobId)}/start`, {
       method: 'POST',
       headers: jsonHeaders(),
     });
@@ -984,7 +875,7 @@ export async function fetchBrowserAgentJob(jobId) {
   const url = `${base}/${encodeURIComponent(jobId)}`;
 
   try {
-    const response = await fetch(url, { headers: jsonHeaders() });
+    const response = await widgetFetch(url, { headers: jsonHeaders() });
     const data = await parseJson(response);
     if (response.status === 404) {
       return { status: 'not_found' };
@@ -997,18 +888,14 @@ export async function fetchBrowserAgentJob(jobId) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Chat persistence across host-page navigation. The injected widget lives in an iframe; when the
-// host page navigates, the iframe is destroyed and recreated with empty React state. We stash the
-// conversation (messages, open state, pending browser-use job) in sessionStorage — same-origin,
-// per-tab — so the freshly-injected widget restores it instead of resetting.
-// ---------------------------------------------------------------------------------------------
+// Chat and goal state use private extension session storage per tab, or localStorage in preview.
 const CHAT_STATE_KEY = 'atb_widget_chat_state';
 const CHAT_STATE_TTL_MS = 60 * 60 * 1000;
 
 export function saveChatState(state) {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.setItem(
+    if (typeof window === 'undefined' || !widgetStorage()) return;
+    widgetStorage().setItem(
       CHAT_STATE_KEY,
       JSON.stringify({ ...state, ts: Date.now() }),
     );
@@ -1022,8 +909,8 @@ export function saveChatState(state) {
 
 export function readChatState() {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return null;
-    const raw = window.localStorage.getItem(CHAT_STATE_KEY);
+    if (typeof window === 'undefined' || !widgetStorage()) return null;
+    const raw = widgetStorage().getItem(CHAT_STATE_KEY);
     console.log('[ATB_WIDGET_APP] readChatState: localStorage key exists =', raw ? 'yes' : 'no');
     if (!raw) return null;
     const parsed = JSON.parse(raw);
@@ -1041,21 +928,18 @@ export function readChatState() {
 
 export function clearChatState() {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    window.localStorage.removeItem(CHAT_STATE_KEY);
+    if (typeof window === 'undefined' || !widgetStorage()) return;
+    widgetStorage().removeItem(CHAT_STATE_KEY);
   } catch {
     /* ignore */
   }
 }
 
-// Removes all atb_widget_* localStorage keys from the iframe origin (localhost:5174).
-// Does NOT clear the atb.tn bridge key (lives in parent page localStorage).
-// Call from iframe DevTools console: __atbWidgetReset()
-// Or trigger via postMessage ATB_WIDGET_DEV_RESET from content.js.
+// Clear only widget-owned keys in the configured storage.
 export function clearAllWidgetState() {
   try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    const storage = window.localStorage;
+    if (typeof window === 'undefined' || !widgetStorage()) return;
+    const storage = widgetStorage();
     const removed = [];
     for (let i = storage.length - 1; i >= 0; i--) {
       const key = storage.key(i);
@@ -1072,7 +956,6 @@ export function clearAllWidgetState() {
 
 if (typeof window !== 'undefined') {
   window.__atbWidgetReset = clearAllWidgetState;
-  console.log('[ATB_WIDGET_APP] dev reset: call __atbWidgetReset() from iframe DevTools console, or __atbWidgetReset() from ATB page console (after content.js sets it up)');
 }
 
 export async function executePreparedAction(preparation) {
@@ -1142,7 +1025,7 @@ export async function openDownloadUrl(url) {
   }
 
   const popup = window.open('', '_blank', 'noopener,noreferrer');
-  const response = await fetch(absoluteUrl, {
+  const response = await widgetFetch(absoluteUrl, {
     headers: authHeaders(),
   });
 
