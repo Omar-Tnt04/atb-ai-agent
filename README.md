@@ -4,6 +4,8 @@ A local MVP / proof of concept for a website AI agent that can answer questions 
 
 The current demo target is the ATB public website, but the architecture is designed to be reusable for any website that can be indexed into context files.
 
+> **Disclaimer:** personal/academic project. Not affiliated with, endorsed by, or sponsored by Arab Tunisian Bank (ATB). The ATB website is used only as a demo target, and indexed content comes from its public pages. All trademarks belong to their owners.
+
 ## What the agent does
 
 The agent supports two main modes:
@@ -292,3 +294,7 @@ serve widget frontend
 inject with extension for demo or script tag for production
 ```
 
+
+## License
+
+MIT, see [LICENSE](LICENSE).
